@@ -2,6 +2,12 @@ import xarray as xr
 import numpy as np
 import json
 from tqdm import tqdm
+import torch
+import pandas as pd
+import datetime
+from utils import ERA5Dataset
+from torch.utils.data import DataLoader
+
 
 file_directory = "ERA5_DATA_LOCATION"
 save_directory = "./data"
@@ -103,3 +109,78 @@ print(f"Normalization factors saved to {json_file}")
 for var_name, stats in statistics.items():
     print(f"{var_name}: Mean = {stats['mean']}, Std = {stats['std']}")
 
+## Calculate residual stds
+
+variable_names = [k[0] for k in var_names.values()]
+
+mean_data = torch.tensor([stats["mean"] for (key, stats) in statistics.items() if key in variable_names])
+std_data = torch.tensor([stats["std"] for (key, stats) in statistics.items() if key in variable_names])
+norm_factors = np.stack([mean_data, std_data], axis=0)
+
+# Get the number of samples, training and validation samples
+ti = pd.date_range(datetime.datetime(1979,1,1,0), datetime.datetime(2018,12,31,23), freq='1h')
+n_samples, n_train, n_val = len(ti), sum(ti.year <= 2015), sum((ti.year >= 2016) & (ti.year <= 2017))
+
+kwargs = {
+            'dataset_path':     f'{save_directory}/{save_name}1979-2018_5.625deg.npy',
+            'sample_counts':    (n_samples, n_train, n_val),
+            'dimensions':       (len(var_names), 32, 64),
+            'max_horizon':      240, # For scaling the time embedding
+            'norm_factors':     norm_factors,
+            'device':           'cpu',
+            'spacing':          1,
+            'dtype':            'float32',
+            'conditioning_times':    [0],
+            'lead_time_range':  (1, 240, 1),
+            'static_data_path': None,
+            'random_lead_time': 0,
+            }
+
+stds_directory = f"{save_directory}/residual_stds"
+
+def calculate_residual_mean_std(loader):
+    mean_data_latent, std_data_latent, count = 0.0, 0.0, 0
+    
+    with torch.no_grad():
+        for current, next, _ in loader:
+            inputs = next - current
+            count += inputs.size(0)
+            
+            mean_data_latent += torch.sum(inputs, dim=(0,2,3))
+            std_data_latent += torch.sum(inputs ** 2, dim=(0,2,3))
+            break # Calculating for a single batch is sufficient
+            
+        count = count * inputs[0, 0].cpu().detach().numpy().size
+        mean_data_latent /= count
+        std_data_latent = torch.sqrt(std_data_latent / count - mean_data_latent ** 2)
+    
+    return mean_data_latent, std_data_latent
+
+lead_time = 1
+max_lead_time = 240
+
+bs = 10000
+train_dataset = ERA5Dataset(lead_time=lead_time, dataset_mode='train', **kwargs)
+train_loader = DataLoader(train_dataset, batch_size=bs, shuffle=True)
+
+ts = np.arange(lead_time, max_lead_time + 1, 1)
+
+stds_dict = {var_name: [] for var_name in variable_names}
+
+for t in (ts):
+    train_dataset.set_lead_time(t)
+    
+    mean_t, std_t = calculate_residual_mean_std(train_loader)
+    print(t, std_t)
+    for i, var_name in enumerate(stds_dict):
+        stds_dict[var_name].append(std_t[i].item())
+    
+save_directory = f"residual_stds"
+for var_name, stds in stds_dict.items():
+    stds_content = "\n".join([f"{ts[i]} {std}" for i, std in enumerate(stds)])
+    
+    file_path = f"{save_directory}/WB_{var_name}.txt"
+    with open(file_path, "w") as file:
+        file.write(stds_content)
+
+    print(f"Standard deviations for {var_name} saved to {file_path}")
