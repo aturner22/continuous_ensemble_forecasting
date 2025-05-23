@@ -155,6 +155,26 @@ predictions = zarr.open(f'{result_path}/{name}.zarr', mode='w', shape=(len(datas
 
 start_idx = 0  # Track index for where to write in the file
 
+def get_latents(latent_shape, n_direct, alpha=1.0):
+    """
+    Variance preserving function for the noise z. 
+    alpha=1.0 means fixed noise, 
+    alpha=0.0 means uncorrelated noise
+    """
+    B, C, H, W = latent_shape # latent_shape: (n_samples * n_ens, num_variables, dx, dy)
+
+    z = torch.zeros((n_direct, B, C, H, W), device=device)
+    z[0] = torch.randn((B, C, H, W), device=device)
+    alpha = torch.tensor(alpha, device=device)
+
+    for t in range(1, n_direct):
+        noise = torch.randn((B, C, H, W), device=device)
+        z[t] = (alpha).sqrt() * z[t - 1] + (1 - alpha).sqrt() * noise
+
+    z = z.transpose(0, 1).reshape(n_direct * B, C, H, W) # Transposing makes sure the order is preserved.
+
+    return z
+
 # Predict
 for previous, current, time_labels in tqdm(loader):        
     n_samples = current.shape[0]
@@ -172,7 +192,6 @@ for previous, current, time_labels in tqdm(loader):
         static_fields = class_labels[:, -num_static_fields:]
 
         latent_shape = (n_samples * n_ens, num_variables, dx, dy)
-        latents = torch.randn(latent_shape, device=device)
 
         direct_time_labels = direct_time_labels.repeat(n_ens * n_samples) # Can not be changed if n_direct > 1
 
@@ -180,8 +199,11 @@ for previous, current, time_labels in tqdm(loader):
         predicted_combined = torch.zeros((n_samples, n_ens, n_times, num_variables, dx, dy), device=device)
 
         for i in tqdm(range(n_iter)):
+            # First option uses same noise for all times
             latents = torch.randn(latent_shape, device=device)
-            latents = latents.repeat_interleave(n_direct, dim=0) # Can not be changed if batchsz > 1 or n_ens >1
+            latents = latents.repeat_interleave(n_direct, dim=0)
+            # Second option controls the correlation of the noise with alpha
+            # latents = get_latents(latent_shape, n_direct, alpha=1.0)
             
             predicted = sampler_fn(model, latents, class_labels, direct_time_labels / max_horizon, 
                                     sigma_max=80, sigma_min=0.03, rho=7, num_steps=20, S_churn=2.5, S_min=0.75, S_max=80, S_noise=1.05)
