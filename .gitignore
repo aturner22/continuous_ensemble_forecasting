@@ -5,3 +5,7 @@
 *.csv
 __pycache__
 *.zarr
+venv
+data*
+era5_data*
+results
