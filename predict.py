@@ -15,16 +15,17 @@ import pandas as pd
 import datetime
 import gc
 import zarr
+import os
 
 from utils import *
 from loss import *
 from sampler import *
 
-data_directory = '../data'
+data_directory = './data'
 result_directory = './results'
 model_directory = './models'
 
-variable_names = ['z500', 't850', 't2m', 'u10', 'v10']
+variable_names = ['geopotential_500', 'temperature_850', '2m_temperature', '10m_u_component_of_wind', '10m_v_component_of_wind']
 num_variables, num_static_fields = 5, 2
 max_horizon = 240 # Maximum time horizon for the model. Used for scaling time embedding and making sure we don't go outside dataset
 
@@ -38,6 +39,32 @@ def load_config(json_file):
     with open(json_file, 'r') as file:
         config = json.load(file)
     return config
+
+def get_actual_dataset_shape(dataset_path):
+    """Get the actual shape of the dataset file"""
+    if not os.path.exists(dataset_path):
+        raise FileNotFoundError(f"Dataset file not found: {dataset_path}")
+    
+    # Get file size
+    file_size = os.path.getsize(dataset_path)
+    bytes_per_element = 4  # float32
+    
+    # Calculate total elements
+    total_elements = file_size // bytes_per_element
+    
+    # Known dimensions
+    num_vars = 5
+    n_lat = 32
+    n_lon = 64
+    
+    # Calculate n_samples
+    n_samples = total_elements // (num_vars * n_lat * n_lon)
+    
+    print(f"Dataset file size: {file_size} bytes")
+    print(f"Calculated dataset shape: ({n_samples}, {num_vars}, {n_lat}, {n_lon})")
+    
+    return n_samples, num_vars, n_lat, n_lon
+
 config_path = args.config_path
 config = load_config(config_path)
 
@@ -64,7 +91,13 @@ shutil.copy(config_path, result_path / "config.json")
 
 # Load normalization factors
 with open(f'{data_directory}/norm_factors.json', 'r') as f:
-    statistics = json.load(f)
+    json_statistics = json.load(f)
+
+statistics = json_statistics.copy()
+for key in json_statistics.keys():
+    for subkey in json_statistics[key]:
+        statistics[key][subkey] = np.float32(json_statistics[key][subkey])
+
 mean_data = torch.tensor([stats["mean"] for (key, stats) in statistics.items() if key in variable_names])
 std_data = torch.tensor([stats["std"] for (key, stats) in statistics.items() if key in variable_names])
 norm_factors = np.stack([mean_data, std_data], axis=0)
@@ -74,12 +107,39 @@ def renormalize(x, mean_ar=mean_data, std_ar=std_data):
     x = x * std_ar[None, :, None, None] + mean_ar[None, :, None, None]
     return x
 
-# Get the number of samples, training and validation samples
-ti = pd.date_range(datetime.datetime(1979,1,1,0), datetime.datetime(2018,12,31,23), freq='1h')
-n_samples, n_train, n_val = len(ti), sum(ti.year <= 2015), sum((ti.year >= 2016) & (ti.year <= 2017))
+# Get the actual dataset dimensions
+dataset_path = f'{data_directory}/geopotential_500_temperature_850_2m_temperature_10m_u_component_of_wind_10m_v_component_of_wind1979-2018_5.625deg.npy'
+n_samples, num_vars_check, n_lat, n_lon = get_actual_dataset_shape(dataset_path)
+
+# Verify dimensions match expectations
+if num_vars_check != num_variables:
+    raise ValueError(f"Expected {num_variables} variables, but dataset has {num_vars_check}")
+
+# Calculate split based on actual sample count
+n_train = int(0.8 * n_samples)
+n_val = int(0.1 * n_samples)
+n_test = n_samples - n_train - n_val
+
+print(f"Actual dataset info:")
+print(f"Total samples: {n_samples}")
+print(f"Training samples: {n_train}")
+print(f"Validation samples: {n_val}")
+print(f"Test samples: {n_test}")
+
+# Adjust max_horizon based on actual dataset size
+max_horizon = min(max_horizon, n_samples // 4)
+print(f"Adjusted max_horizon: {max_horizon}")
 
 # Load the latitudes and longitudes
-lat, lon = np.load(f'{data_directory}/latlon_1979-2018_5.625deg.npz').values()
+lat_lon_file = f'{data_directory}/latlon_1979-2018_5.625deg.npz'
+if os.path.exists(lat_lon_file):
+    lat_lon_data = np.load(lat_lon_file)
+    lat, lon = lat_lon_data['lat'], lat_lon_data['lon']
+else:
+    # Create dummy lat/lon if file doesn't exist
+    lat = np.linspace(-90, 90, n_lat)
+    lon = np.linspace(-180, 180, n_lon)
+    print("Warning: Using dummy lat/lon coordinates")
 
 # Load config of trained model
 train_config_path = f'{model_directory}/{model_path}/config.json'
@@ -97,18 +157,27 @@ if t_iter > max_trained_lead_time:
 if t_direct < delta_t:
     print(f"The direct lead time {t_direct} is smaller than the trained dt {delta_t}")
 
+# Check if static data exists
+static_data_path = f'{data_directory}/orog_lsm_1979-2018_5.625deg.npy'
+if not os.path.exists(static_data_path):
+    static_data_path = f'{data_directory}/orog_lsm1979-2018_5.625deg.npy'
+    if not os.path.exists(static_data_path):
+        print("Warning: Static data file not found, setting to None")
+        static_data_path = None
+        num_static_fields = 0
+
 kwargs = {
-            'dataset_path':     f'{data_directory}/z500_t850_t2m_u10_v10_1979-2018_5.625deg.npy',
+            'dataset_path':     dataset_path,
             'sample_counts':    (n_samples, n_train, n_val),
-            'dimensions':       (num_variables, len(lat), len(lon)),
-            'max_horizon':      max_horizon, # For scaling the time embedding
+            'dimensions':       (num_variables, n_lat, n_lon),
+            'max_horizon':      max_horizon,
             'norm_factors':     norm_factors,
             'device':           device,
             'spacing':          spacing,
             'dtype':            'float32',
             'conditioning_times':    conditioning_times,
             'lead_time_range':  [t_min, t_max, t_direct],
-            'static_data_path': f'{data_directory}/orog_lsm_1979-2018_5.625deg.npy',
+            'static_data_path': static_data_path,
             'random_lead_time': 0,
             }
 
@@ -131,23 +200,32 @@ model.to(device)
 print(f"Loaded model {model_path}, {model_choice}",  flush=True)
 print("Num params: ", sum(p.numel() for p in model.parameters()), flush=True)
 
-forecasting_times = t_min + t_direct * np.arange(0, 1 + (t_max-t_min)//t_direct)
+# Adjust forecasting times based on available data
+max_possible_lead_time = min(t_max, n_test - 1)  # Can't forecast beyond available test data
+forecasting_times = t_min + t_direct * np.arange(0, 1 + (max_possible_lead_time-t_min)//t_direct)
+print(f"Forecasting times: {forecasting_times}")
+
 dataset = ERA5Dataset(lead_time=forecasting_times, dataset_mode='test', **kwargs)
 loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
 sampler_fn = heun_sampler
 
-print(f"Datset contains {len(dataset)} samples",  flush=True)
+print(f"Dataset contains {len(dataset)} samples",  flush=True)
 print(f"We do {len(loader)} batches",  flush=True)
 
 model.eval()
 
 # Initialize the dimensions based on the first batch
-previous, current, time_labels = next(iter(loader))
-n_times = time_labels.shape[1]
-n_conditions = previous.shape[1]
-dx = current.shape[2]
-dy = current.shape[3]    
+try:
+    previous, current, time_labels = next(iter(loader))
+    n_times = time_labels.shape[1]
+    n_conditions = previous.shape[1]
+    dx = current.shape[2]
+    dy = current.shape[3]    
+except Exception as e:
+    print(f"Error getting first batch: {e}")
+    print("This might be because the test dataset is too small or parameters are incompatible")
+    raise
 
 predictions = zarr.open(f'{result_path}/{name}.zarr', mode='w', shape=(len(dataset), n_ens, n_times, num_variables, dx, dy), 
                                 chunks = (1, n_ens, n_times, num_variables, dx, dy),
@@ -189,7 +267,8 @@ for previous, current, time_labels in tqdm(loader):
 
         class_labels = previous.repeat_interleave(n_direct * n_ens, dim=0) # Can not be changed if batchsz > 1
 
-        static_fields = class_labels[:, -num_static_fields:]
+        if num_static_fields > 0:
+            static_fields = class_labels[:, -num_static_fields:]
 
         latent_shape = (n_samples * n_ens, num_variables, dx, dy)
 
