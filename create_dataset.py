@@ -1,5 +1,6 @@
 import xarray as xr
 import numpy as np
+import os
 import json
 from tqdm import tqdm
 import torch
@@ -11,6 +12,7 @@ from torch.utils.data import DataLoader
 
 file_directory = "ERA5_DATA_LOCATION"
 save_directory = "./data"
+os.makedirs(save_directory, exist_ok=True)
 
 field_names = {
     "orography": "orog",
@@ -92,7 +94,7 @@ for file_prefix, names in var_names.items():
     num_elements = array.size
     mean_value /= num_elements
     std_value = np.sqrt(std_value / num_elements - mean_value ** 2)
-    statistics[var_name] = {"mean": mean_value, "std": std_value}
+    statistics[var_name] = {"mean": float(mean_value),"std": float(std_value)}
 
     i += 1
 
@@ -122,7 +124,7 @@ ti = pd.date_range(datetime.datetime(1979,1,1,0), datetime.datetime(2018,12,31,2
 n_samples, n_train, n_val = len(ti), sum(ti.year <= 2015), sum((ti.year >= 2016) & (ti.year <= 2017))
 
 kwargs = {
-            'dataset_path':     f'{save_directory}/{save_name}1979-2018_5.625deg.npy',
+            'dataset_path':     f'{save_directory}/{save_name}_1979-2018_5.625deg.npy',
             'sample_counts':    (n_samples, n_train, n_val),
             'dimensions':       (len(var_names), 32, 64),
             'max_horizon':      240, # For scaling the time embedding
@@ -137,6 +139,7 @@ kwargs = {
             }
 
 stds_directory = f"{save_directory}/residual_stds"
+os.makedirs(stds_directory, exist_ok=True)
 
 def calculate_residual_mean_std(loader):
     mean_data_latent, std_data_latent, count = 0.0, 0.0, 0
@@ -175,11 +178,10 @@ for t in (ts):
     for i, var_name in enumerate(stds_dict):
         stds_dict[var_name].append(std_t[i].item())
     
-save_directory = f"residual_stds"
 for var_name, stds in stds_dict.items():
     stds_content = "\n".join([f"{ts[i]} {std}" for i, std in enumerate(stds)])
     
-    file_path = f"{save_directory}/WB_{var_name}.txt"
+    file_path = f"{stds_directory}/WB_{var_name}.txt"
     with open(file_path, "w") as file:
         file.write(stds_content)
 
