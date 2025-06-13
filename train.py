@@ -110,19 +110,25 @@ val_batch_sampler = DynamicKBatchSampler(val_time_dataset, batch_size=batch_size
 val_time_loader = DataLoader(val_time_dataset, batch_sampler=val_batch_sampler)
 
 input_times = (1 + len(conditioning_times))*num_variables + num_static_fields
-
+deterministic = False
 if 'autoregressive' in model_choice:
     time_emb = 0
 elif 'continuous' in model_choice:
     time_emb = 1
+elif 'deterministic' in model_choice:
+    deterministic = True    
+    input_times = (len(conditioning_times))*num_variables + num_static_fields
+
+    model = DetPrecond(filters=filters, img_channels=input_times, out_channels=num_variables, img_resolution = 64)
+    loss_fn = WMSELoss(lat, lon, device, precomputed_std=residual_stds)
+    print("Using deterministic model", flush=True)
 else:
     raise ValueError(f"Model choice {model_choice} not recognized.")
 
-# Define the model and loss function
-model = EDMPrecond(filters=filters, img_channels=input_times, out_channels=num_variables, img_resolution = 64, time_emb=time_emb, 
-                    sigma_data=1, sigma_min=0.02, sigma_max=88)
-
-loss_fn = WGCLoss(lat, lon, device, precomputed_std=residual_stds)
+if not deterministic:
+    model = EDMPrecond(filters=filters, img_channels=input_times, out_channels=num_variables, img_resolution = 64, time_emb=time_emb, 
+                        sigma_data=1, sigma_min=0.02, sigma_max=88)
+    loss_fn = WGCLoss(lat, lon, device, precomputed_std=residual_stds)
 
 print(name, flush=True)
 print(model_choice, flush=True)

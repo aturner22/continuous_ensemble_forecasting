@@ -435,3 +435,29 @@ class EDMPrecond(torch.nn.Module):
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
+
+   
+#----------------------------------------------------------------------------
+# Deterministic preconditioning
+
+class DetPrecond(torch.nn.Module):
+    def __init__(self,
+        img_resolution,                     # Image resolution.
+        img_channels,                       # Number of color channels.
+        out_channels,
+        filters         = 128,              # Number of filters in model
+        label_dropout   = 0,                # Dropout for classifier free guidance
+    ):
+        super().__init__()
+        self.img_resolution = img_resolution
+        self.img_channels = img_channels
+
+        self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
+                            embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
+                            channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
+                            time_emb=0, attn_resolutions=[32,], label_dropout=label_dropout)
+    
+    def forward(self, x, time_labels, class_labels=None):
+        x = x.to(torch.float32)
+        D_x = self.model(x, time_labels, class_labels=class_labels).to(torch.float32)
+        return D_x

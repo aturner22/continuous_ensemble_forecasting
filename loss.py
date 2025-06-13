@@ -51,6 +51,34 @@ class WGCLoss:
         loss = loss.sum().mul(1/(images.shape[0]*images.shape[1]))
         return loss
 
+class WMSELoss:
+    def __init__(self, lat, lon, device, time_noise=0, precomputed_std=None):
+        self.area_weights = torch.tensor(comp_area_weights_simple(lat, lon), device=device, dtype=torch.float32)
+        self.time_noise = time_noise
+        self.precomputed_std = precomputed_std
+
+    def residual_scaling(self, x):
+        if x.ndim == 0:
+            x = x.unsqueeze(0)  
+        indices = (len(self.precomputed_std)*x).to(dtype=int) - 1
+        
+        return self.precomputed_std[indices].view(x.shape[0], -1, 1, 1)
+    
+    def __call__(self, net, images, class_labels=None, time_labels=None):
+        # Time Augmentation
+        if self.time_noise > 0:
+            time_labels = time_labels + torch.randn_like(time_labels, device=images.device, dtype=torch.float32) * self.time_noise
+        
+        y = images
+        D_yn = net(class_labels, time_labels)
+        loss = self.area_weights * ((D_yn - y) ** 2)
+
+        if self.precomputed_std != None:
+            loss = loss / self.residual_scaling(time_labels) # Scale by residual weight
+
+        loss = loss.sum().mul(1/(images.shape[0]*images.shape[1]))
+        return loss
+
 #----------------------------------------------------------------------------
 # Area weighted loss function from the codebase 
 # diffusion-models-for-weather-prediction

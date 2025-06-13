@@ -114,16 +114,26 @@ kwargs = {
 
 input_times = (1 + len(conditioning_times))*num_variables + num_static_fields
 
+deterministic = False
 if 'autoregressive' in model_choice:
     time_emb = 0
 elif 'continuous' in model_choice:
     time_emb = 1
+elif 'deterministic' in model_choice:
+    if n_ens > 1:
+        raise ValueError("Deterministic model can not be used with n_ens > 1. Use n_ens = 1 for deterministic models.")
+    
+    deterministic = True    
+    input_times = (len(conditioning_times))*num_variables + num_static_fields
+
+    model = DetPrecond(filters=filters, img_channels=input_times, out_channels=num_variables, img_resolution = 64)
+    print("Using deterministic model", flush=True)
 else:
     raise ValueError(f"Model choice {model_choice} not recognized.")
 
-# Define the model and loss function
-model = EDMPrecond(filters=filters, img_channels=input_times, out_channels=num_variables, img_resolution = 64, time_emb=time_emb, 
-                    sigma_data=1, sigma_min=0.02, sigma_max=88)
+if not deterministic:
+    model = EDMPrecond(filters=filters, img_channels=input_times, out_channels=num_variables, img_resolution = 64, time_emb=time_emb, 
+                        sigma_data=1, sigma_min=0.02, sigma_max=88)
 
 model.load_state_dict(torch.load(f'{model_directory}/{model_path}/best_model.pth', map_location=device))
 model.to(device)
@@ -205,7 +215,10 @@ for previous, current, time_labels in tqdm(loader):
             # Second option controls the correlation of the noise with alpha
             # latents = get_latents(latent_shape, n_direct, alpha=1.0)
             
-            predicted = sampler_fn(model, latents, class_labels, direct_time_labels / max_horizon, 
+            if deterministic:
+                predicted = model(class_labels, direct_time_labels / max_horizon)
+            else:
+                predicted = sampler_fn(model, latents, class_labels, direct_time_labels / max_horizon, 
                                     sigma_max=80, sigma_min=0.03, rho=7, num_steps=20, S_churn=2.5, S_min=0.75, S_max=80, S_noise=1.05)
 
             predicted_combined[:, :, i*n_direct:(i+1)*n_direct] = predicted.view(n_samples, n_ens, n_direct, num_variables, dx, dy)
@@ -295,7 +308,7 @@ if name not in metrics:
 
 # Store the metrics in the corresponding group
 group = metrics[name]
-group.array('RMSE', skill, overwrite=True)
+group.array('skill', skill, overwrite=True)
 group.array('spread', spread, overwrite=True)
 group.array('SSR', ssr, overwrite=True)
 group.array('CRPS', CRPS, overwrite=True)
