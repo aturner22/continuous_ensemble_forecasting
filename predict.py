@@ -203,7 +203,7 @@ for previous, current, time_labels in tqdm(loader):
 
         latent_shape = (n_samples * n_ens, num_variables, dx, dy)
 
-        direct_time_labels = direct_time_labels.repeat(n_ens * n_samples) # Can not be changed if n_direct > 1
+        direct_time_labels_repeated = direct_time_labels.repeat(n_ens * n_samples) # Can not be changed if n_direct > 1
 
         # Test
         predicted_combined = torch.zeros((n_samples, n_ens, n_times, num_variables, dx, dy), device=device)
@@ -216,20 +216,27 @@ for previous, current, time_labels in tqdm(loader):
             # latents = get_latents(latent_shape, n_direct, alpha=1.0)
             
             if deterministic:
-                predicted = model(class_labels, direct_time_labels / max_horizon)
+                predicted = model(class_labels, direct_time_labels_repeated / max_horizon)
             else:
-                predicted = sampler_fn(model, latents, class_labels, direct_time_labels / max_horizon, 
+                predicted = sampler_fn(model, latents, class_labels, direct_time_labels_repeated / max_horizon, 
                                     sigma_max=80, sigma_min=0.03, rho=7, num_steps=20, S_churn=2.5, S_min=0.75, S_max=80, S_noise=1.05)
 
             predicted_combined[:, :, i*n_direct:(i+1)*n_direct] = predicted.view(n_samples, n_ens, n_direct, num_variables, dx, dy)
 
             predicted = predicted.view(n_samples*n_ens, n_direct, num_variables, dx, dy)
             class_labels = class_labels.view(n_samples*n_ens, n_direct, n_conditions, dx, dy)[:, 0]
+            
+            initial_condition = predicted[:,-1]
+            
+            idx = np.argwhere(direct_time_labels.cpu().numpy() == - conditioning_times[1])
+            
+            if idx.size == 0:
+                raise ValueError(f"Previous timestep {-conditioning_times[1]} not found in forecasting times {direct_time_labels.cpu().numpy()}")
+            idx = idx[0][0] + 1
+           
+            earlier_initial_condition = class_labels[:,:num_variables] if idx == len(direct_time_labels) else predicted[:,-(idx+1)]
 
-            if n_direct == 1:
-                class_labels = torch.cat((predicted[:,-1], class_labels[:,:num_variables]), dim=1)#.repeat_interleave(n_direct, dim=0)
-            else:
-                class_labels = torch.cat((predicted[:,-1], predicted[:,-2]), dim=1).repeat_interleave(n_direct, dim=0) # Can not be changed if batchsz > 1
+            class_labels = torch.cat((initial_condition, earlier_initial_condition), dim=1).repeat_interleave(n_direct, dim=0)
             
             if num_static_fields != 0:
                 class_labels = torch.cat((class_labels, static_fields), dim=1)
