@@ -1,4 +1,4 @@
-
+.env
 *.pdf
 *.png
 *.gif
@@ -9,3 +9,5 @@ venv
 data*
 era5_data*
 results
+residual_std
+.DS_Store

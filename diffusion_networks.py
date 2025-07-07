@@ -391,53 +391,6 @@ class SongUNet(torch.nn.Module):
         return aux
 
 #----------------------------------------------------------------------------
-# Improved preconditioning proposed in the paper "Elucidating the Design
-# Space of Diffusion-Based Generative Models" (EDM).
-
-class EDMPrecond(torch.nn.Module):
-    def __init__(self,
-        img_resolution,                     # Image resolution.
-        img_channels,                       # Number of color channels.
-        out_channels,
-        sigma_min       = 0,                # Minimum supported noise level.
-        sigma_max       = float('inf'),     # Maximum supported noise level.
-        sigma_data      = 0.5,              # Expected standard deviation of the training data.
-        filters         = 128,              # Number of filters in model
-        time_emb        = 0,                # If we embed time or not
-        label_dropout   = 0,                # Dropout for classifier free guidance
-    ):
-        super().__init__()
-        self.img_resolution = img_resolution
-        self.img_channels = img_channels
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
-        self.sigma_data = sigma_data
-        
-        self.model = SongUNet(img_resolution=img_resolution, in_channels=img_channels, out_channels=out_channels, \
-                            embedding_type='fourier', encoder_type='residual', decoder_type='standard', \
-                            channel_mult_noise=2, resample_filter=[1,3,3,1], model_channels=filters, channel_mult=[2,2,2], \
-                            time_emb=time_emb, attn_resolutions=[32,], label_dropout=label_dropout)
-    
-    def forward(self, x, sigma, class_labels=None, time_labels=None):
-        x = x.to(torch.float32)
-        sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
-        dtype = torch.float32
-
-        c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
-        c_out = sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2).sqrt()
-        c_in = 1 / (self.sigma_data ** 2 + sigma ** 2).sqrt()
-        c_noise = sigma.log() / 4
-
-        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels=class_labels, time_labels=time_labels)
-        assert F_x.dtype == dtype
-        D_x = c_skip * x + c_out * F_x.to(torch.float32)
-        return D_x
-
-    def round_sigma(self, sigma):
-        return torch.as_tensor(sigma)
-
-   
-#----------------------------------------------------------------------------
 # Deterministic preconditioning
 
 class DetPrecond(torch.nn.Module):

@@ -10,7 +10,7 @@ from utils import ERA5Dataset
 from torch.utils.data import DataLoader
 
 
-file_directory = "ERA5_DATA_LOCATION"
+file_directory = "era5_data"
 save_directory = "./data"
 os.makedirs(save_directory, exist_ok=True)
 
@@ -177,7 +177,10 @@ for t in (ts):
     print(t, std_t)
     for i, var_name in enumerate(stds_dict):
         stds_dict[var_name].append(std_t[i].item())
-    
+
+save_directory = f"data/residual_stds"
+os.makedirs(save_directory, exist_ok=True)
+
 for var_name, stds in stds_dict.items():
     stds_content = "\n".join([f"{ts[i]} {std}" for i, std in enumerate(stds)])
     
