@@ -1,6 +1,8 @@
 # core/gibbs_abc.py
 # Gibbs–ABC engine with embarrassingly-parallel proposal evaluation.
 # Cleaned for multiprocessing: all worker targets are top-level functions.
+raise RuntimeError("DO NOT USE THIS FILE")
+
 
 import numpy as np
 import torch

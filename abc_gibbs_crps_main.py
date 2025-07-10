@@ -32,7 +32,7 @@ if __name__ == "__main__":
     )
     from core.io_utils import prepare_model_and_loader, save_posterior_statistics
     from core.helpers import materialise_batches
-    from core.gibbs_abc_save import run_gibbs_abc
+    from core.gibbs_abc import run_gibbs_abc as threaded_run_gibbs_abc
     from core.plotting import produce_trace_and_histogram_plots, produce_rank_histograms
     from core.diagnostics import print_posterior_summary
 
@@ -61,7 +61,9 @@ if __name__ == "__main__":
 
     cached_batches = materialise_batches(loader, device, NUM_VARIABLES, MAX_HORIZON, latitude, longitude)
 
-    results = run_gibbs_abc(
+    print("RUNNING:", threaded_run_gibbs_abc.__module__)
+
+    results = threaded_run_gibbs_abc(
         model=model,
         batches=cached_batches,
         ensemble_size=ENSEMBLE_SIZE,
