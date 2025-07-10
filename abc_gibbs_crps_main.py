@@ -13,7 +13,7 @@ if __name__ == "__main__":
 
     os.environ.setdefault("OMP_NUM_THREADS", str(OMP_NUM_THREADS))
     os.environ.setdefault("MKL_NUM_THREADS", str(OMP_NUM_THREADS))
-    print(f"Using {N_WORKERS} workers × {OMP_NUM_THREADS} BLAS threads")
+    print(f"Using {N_WORKERS} workers x {OMP_NUM_THREADS} BLAS threads")
 
     import json
     import torch
