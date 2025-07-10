@@ -17,6 +17,10 @@ if __name__ == "__main__":
 
     import json
     import torch
+    import os
+
+    print("Torch threads:", torch.get_num_threads())
+    print("NumPy threads:", os.environ.get("OMP_NUM_THREADS", "undefined"))
     device = torch.device("cpu")
     import numpy as np
     import random
