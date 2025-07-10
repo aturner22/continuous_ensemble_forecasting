@@ -18,15 +18,17 @@ if __name__ == "__main__":
     import json
     import torch
     import os
-
-    print("Torch threads:", torch.get_num_threads())
-    print("NumPy threads:", os.environ.get("OMP_NUM_THREADS", "undefined"))
-    device = torch.device("cpu")
     import numpy as np
-    import random
 
-    from pathlib import Path
-    from tqdm import tqdm
+    print("Torch intra-op threads:", torch.get_num_threads())
+    print("Torch inter-op threads:", torch.get_num_interop_threads())
+    print("OMP_NUM_THREADS:", os.getenv("OMP_NUM_THREADS"))
+    print("MKL_NUM_THREADS:", os.getenv("MKL_NUM_THREADS"))
+    print("OPENBLAS_NUM_THREADS:", os.getenv("OPENBLAS_NUM_THREADS"))
+    print("NumPy show_config:")
+    np.show_config()
+    device = torch.device("cpu")
+    import random
 
     from core.constants import (
         SAMPLE_SIZE, ENSEMBLE_SIZE, N_GIBBS_STEPS, N_PROPOSALS_PER_VARIABLE,
