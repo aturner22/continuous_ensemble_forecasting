@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+device = torch.device("cpu")
 from torch.utils.data import Sampler
 
 class ERA5Dataset(torch.utils.data.Dataset):
