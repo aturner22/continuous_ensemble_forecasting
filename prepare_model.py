@@ -96,6 +96,7 @@ def prepare_model_and_loader(
     else:
         dataset = full_dataset
 
-    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0, pin_memory=False)
+
 
     return loader, model, lat, lon, result_path
