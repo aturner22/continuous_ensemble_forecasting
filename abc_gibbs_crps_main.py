@@ -40,7 +40,6 @@ if __name__ == "__main__":
     np.random.seed(42)
     random.seed(42)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     with open("configs/predict/deterministic-iterative-6h.json", "r") as config_file:
