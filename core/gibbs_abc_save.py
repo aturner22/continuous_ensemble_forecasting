@@ -1,34 +1,43 @@
-import os
-import torch
+# core/gibbs_abc.py
+# Gibbs–ABC engine with embarrassingly-parallel proposal evaluation.
+# Cleaned for multiprocessing: all worker targets are top-level functions.
+
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import torch
 from tqdm import tqdm
 from functools import partial
+
 from core.evaluation import (
     continuous_ranked_probability_score,
     compute_rank_histogram,
     compute_mean_absolute_error,
     compute_ensemble_spread,
 )
-from core.parallel_utils import N_WORKERS
+from core.parallel_utils import parallel_map, N_WORKERS
 
 
-global_shared_model = None
-global_shared_batches = None
+# ────────────────────────────────────────────────────────────────────────────────
+# Picklable, top-level worker ----------------------------------------------------
 
-
-def set_shared_objects(model, batches):
-    global global_shared_model, global_shared_batches
-    global_shared_model = model
-    global_shared_batches = batches
-
-
-def evaluate_single_proposal_threaded(
+def evaluate_single_proposal(                        # noqa: C901
     proposal_index: int,
     proposal_matrix: np.ndarray,
     variable_index: int,
     ensemble_size: int,
+    batches,
+    model,
 ) -> tuple[float, np.ndarray, list[torch.Tensor], list[torch.Tensor], np.ndarray]:
+    """
+    CRPS-based fitness evaluation for one proposal vector.
+
+    Returns
+    -------
+    aggregate_crps : float
+    proposal_vector : np.ndarray
+    member_list : list[Tensor]
+    target_list : list[Tensor]
+    rank_vector : np.ndarray
+    """
     alpha_bias, beta_bias, alpha_scale, beta_scale = proposal_matrix[proposal_index]
 
     batch_crps_list: list[torch.Tensor] = []
@@ -36,7 +45,7 @@ def evaluate_single_proposal_threaded(
     member_tensor_list: list[torch.Tensor] = []
     target_tensor_list: list[torch.Tensor] = []
 
-    for previous_fields, current_fields, time_normalised in global_shared_batches:
+    for previous_fields, current_fields, time_normalised in batches:
         variable_subset = previous_fields[:, :-2]
         static_subset = previous_fields[:, -2:]
         base_field = variable_subset[:, variable_index]
@@ -51,7 +60,7 @@ def evaluate_single_proposal_threaded(
             modified_variable_subset = variable_subset.clone()
             modified_variable_subset[:, variable_index] = perturbed_field
             model_input_tensor = torch.cat([modified_variable_subset, static_subset], dim=1)
-            model_output_tensor = global_shared_model(model_input_tensor, time_normalised)
+            model_output_tensor = model(model_input_tensor, time_normalised)
             member_accumulator.append(model_output_tensor)
 
         ensemble_tensor = torch.stack(member_accumulator, dim=0)
@@ -82,6 +91,9 @@ def evaluate_single_proposal_threaded(
     )
 
 
+# ────────────────────────────────────────────────────────────────────────────────
+# Main Gibbs–ABC routine --------------------------------------------------------
+
 def run_gibbs_abc(
     *,
     model,
@@ -92,9 +104,14 @@ def run_gibbs_abc(
     num_variables: int,
     parameter_dim: int,
     variable_names,
-    max_horizon: int,
+    max_horizon: int,  # retained for signature consistency
 ):
-    set_shared_objects(model, batches)
+    """
+    Gibbs–ABC inference with CRPS summary statistic.
+
+    Parallelism: proposal vectors are evaluated concurrently across
+    `N_WORKERS` processes or threads as configured in `parallel_utils.py`.
+    """
 
     posterior_samples = np.zeros((n_steps, num_variables, parameter_dim), dtype=np.float32)
     posterior_crps = np.zeros((n_steps, num_variables), dtype=np.float32)
@@ -110,50 +127,53 @@ def run_gibbs_abc(
         size=(num_variables, parameter_dim),
     )
 
+    # ────────────────────────────────────────────────────────────────────────────
     with torch.inference_mode():
         for step_index in tqdm(range(n_steps), desc="Gibbs iteration"):
             for variable_index in range(num_variables):
+
                 proposal_matrix = np.random.normal(
                     loc=current_parameter_matrix[variable_index],
                     scale=[0.05] * parameter_dim,
                     size=(n_proposals, parameter_dim),
                 )
 
-                futures = []
-                with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
-                    for proposal_index in range(n_proposals):
-                        futures.append(
-                            executor.submit(
-                                evaluate_single_proposal_threaded,
-                                proposal_index,
-                                proposal_matrix,
-                                variable_index,
-                                ensemble_size,
-                            )
-                        )
+                best_crps_value = float("inf")
+                best_parameter_vector = current_parameter_matrix[variable_index].copy()
+                best_members_for_diagnostics = None
+                best_targets_for_diagnostics = None
+                best_rank_values = None
 
-                    best_crps_value = float("inf")
-                    best_parameter_vector = current_parameter_matrix[variable_index].copy()
-                    best_members_for_diagnostics = None
-                    best_targets_for_diagnostics = None
-                    best_rank_values = None
+                # ------------------------------------------------------------------
+                # Parallel evaluation of all proposals
+                # ------------------------------------------------------------------
+                evaluator = partial(
+                    evaluate_single_proposal,
+                    proposal_matrix=proposal_matrix,
+                    variable_index=variable_index,
+                    ensemble_size=ensemble_size,
+                    batches=batches,
+                    model=model,
+                )
 
-                    for future in as_completed(futures):
-                        (
-                            aggregate_crps,
-                            candidate_vector,
-                            member_list,
-                            target_list,
-                            rank_vector,
-                        ) = future.result()
+                for (
+                    aggregate_crps,
+                    candidate_vector,
+                    member_list,
+                    target_list,
+                    rank_vector,
+                ) in parallel_map(evaluator, range(n_proposals)):
 
-                        if aggregate_crps < best_crps_value:
-                            best_crps_value = aggregate_crps
-                            best_parameter_vector = candidate_vector
-                            best_members_for_diagnostics = member_list
-                            best_targets_for_diagnostics = target_list
-                            best_rank_values = rank_vector
+                    if aggregate_crps < best_crps_value:
+                        best_crps_value = aggregate_crps
+                        best_parameter_vector = candidate_vector
+                        best_members_for_diagnostics = member_list
+                        best_targets_for_diagnostics = target_list
+                        best_rank_values = rank_vector
 
+                # ------------------------------------------------------------------
+                # Persist optimum for this variable
+                # ------------------------------------------------------------------
                 current_parameter_matrix[variable_index] = best_parameter_vector
                 posterior_samples[step_index, variable_index] = best_parameter_vector
                 posterior_crps[step_index, variable_index] = best_crps_value
@@ -171,6 +191,9 @@ def run_gibbs_abc(
                     )
                 )
 
+            # ----------------------------------------------------------------------
+            # Global performance metric for this Gibbs step
+            # ----------------------------------------------------------------------
             step_mean_crps[step_index] = posterior_crps[step_index].mean()
             print(
                 f"Time-averaged CRPS after Gibbs step {step_index + 1:02d}: "
