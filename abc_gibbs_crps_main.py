@@ -27,7 +27,9 @@ if __name__ == "__main__":
     print("OPENBLAS_NUM_THREADS:", os.getenv("OPENBLAS_NUM_THREADS"))
     print("NumPy show_config:")
     np.show_config()
-    device = torch.device("cpu")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
     import random
 
     from core.constants import (
