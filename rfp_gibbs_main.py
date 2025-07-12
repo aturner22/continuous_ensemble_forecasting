@@ -4,6 +4,7 @@ if __name__ == "__main__":
     import torch
     import json
     from tqdm import tqdm
+    import gc
 
     from core.constants import (
         SAMPLE_SIZE, ENSEMBLE_SIZE, N_GIBBS_STEPS, N_PROPOSALS_PER_VARIABLE,
@@ -59,8 +60,12 @@ if __name__ == "__main__":
 
     print("Standardizing full ERA5 tensor...")
     full_tensor = torch.tensor(full_array, dtype=torch.float32)
-    full_tensor = (full_tensor - mean_data[:, None, None]) / std_data[:, None, None]
-    del full_array
+    del full_array; gc.collect()
+
+    full_tensor.sub_(mean_data[:, None, None]).div_(std_data[:, None, None])
+    if device.type == "cuda":
+        full_tensor = full_tensor.pin_memory()
+    torch.cuda.empty_cache()
 
     print("Commencing ABC-Gibbs inference with RFP perturbations...")
     results = run_gibbs_abc_rfp(
@@ -74,6 +79,9 @@ if __name__ == "__main__":
         max_horizon=MAX_HORIZON,
         reference_tensor=full_tensor,
     )
+    del full_tensor
+    gc.collect()
+    torch.cuda.empty_cache()
 
     print("Saving posterior results...")
     save_posterior_statistics(results, result_path)
@@ -91,44 +99,44 @@ if __name__ == "__main__":
 
     # Visualize perturbation field for variable 2 (e.g., t2m)
     print("Visualizing ensemble statistics at final Gibbs step...")
-final_step = -1
-final_ensemble = results["posterior_samples"][final_step]
-alpha_vec = final_ensemble[:, 0]
+    final_step = -1
+    final_ensemble = results["posterior_samples"][final_step]
+    alpha_vec = final_ensemble[:, 0]
 
-from core.constants import VARIABLE_NAMES
-from core.plotting_rfp import plot_ensemble_statistics
+    from core.constants import VARIABLE_NAMES
+    from core.plotting_rfp import plot_ensemble_statistics
 
-for var_idx, var_name in enumerate(VARIABLE_NAMES):
-    alpha = alpha_vec[var_idx]
-    example_field = cached_batches[0][0][0, var_idx]
+    for var_idx, var_name in enumerate(VARIABLE_NAMES):
+        alpha = alpha_vec[var_idx]
+        example_field = cached_batches[0][0][0, var_idx]
 
-    members = []
-    for _ in range(ENSEMBLE_SIZE):
-        τ1, τ2 = np.random.choice(full_tensor.shape[0], size=2, replace=False)
-        delta_Y = full_tensor[τ1, var_idx] - full_tensor[τ2, var_idx]
-        noise = alpha * delta_Y.to(example_field.device)
-        perturbed = example_field + noise
+        members = []
+        for _ in range(ENSEMBLE_SIZE):
+            τ1, τ2 = np.random.choice(full_tensor.shape[0], size=2, replace=False)
+            delta_Y = full_tensor[τ1, var_idx] - full_tensor[τ2, var_idx]
+            noise = alpha * delta_Y.to(example_field.device)
+            perturbed = example_field + noise
 
-        full_input = cached_batches[0][0].clone()
-        variable_tensor = full_input[:, :-2]
-        static_tensor = full_input[:, -2:]
-        variable_tensor[0, var_idx] = perturbed
-        input_tensor = torch.cat([variable_tensor, static_tensor], dim=1)
+            full_input = cached_batches[0][0].clone()
+            variable_tensor = full_input[:, :-2]
+            static_tensor = full_input[:, -2:]
+            variable_tensor[0, var_idx] = perturbed
+            input_tensor = torch.cat([variable_tensor, static_tensor], dim=1)
 
-        output = model(input_tensor, cached_batches[0][2])
-        members.append(output)
+            output = model(input_tensor, cached_batches[0][2])
+            members.append(output)
 
-    ensemble_tensor = torch.stack(members, dim=0).squeeze(1)  # [E, V, H, W]
-    target = cached_batches[0][1]
+        ensemble_tensor = torch.stack(members, dim=0).squeeze(1)  # [E, V, H, W]
+        target = cached_batches[0][1]
 
-    std_field = ensemble_tensor.std(dim=0)[var_idx].detach().cpu().numpy()
-    print(f"Std Dev [{var_name}]: min = {std_field.min():.4f}, max = {std_field.max():.4f}, mean = {std_field.mean():.4f}")
+        std_field = ensemble_tensor.std(dim=0)[var_idx].detach().cpu().numpy()
+        print(f"Std Dev [{var_name}]: min = {std_field.min():.4f}, max = {std_field.max():.4f}, mean = {std_field.mean():.4f}")
 
-    plot_ensemble_statistics(
-        ensemble_tensor,
-        target,
-        variable_index=var_idx,
-        lat=latitude,
-        lon=longitude,
-        save_prefix=result_path / f"ensemble_stats_{var_name}"
-    )
+        plot_ensemble_statistics(
+            ensemble_tensor,
+            target,
+            variable_index=var_idx,
+            lat=latitude,
+            lon=longitude,
+            save_prefix=result_path / f"ensemble_stats_{var_name}"
+        )

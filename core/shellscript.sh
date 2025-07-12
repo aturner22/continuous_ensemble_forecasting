@@ -20,6 +20,6 @@ export N_WORKERS=1
 
 source venv/bin/activate
 
-python abc_gibbs_crps_main.py configs/predict/deterministic-iterative-6h.json \
+python rfp_gibbs_main.py configs/predict/deterministic-iterative-6h.json \
 --device cuda \
 > output_gpu.log 2> error_gpu.log
