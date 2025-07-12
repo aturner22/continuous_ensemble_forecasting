@@ -5,8 +5,12 @@
 #PBS -l walltime=03:00:00
 #PBS -m abe
 #PBS -k n
+#PBS -j oe
 
-cd $HOME/msc_project
+module load tools/prod
+module load SciPy-bundle/2022.05-foss-2022a
+
+cd "$PBS_O_WORKDIR"
 
 rm -f output_gpu.log error_gpu.log
 
@@ -21,5 +25,5 @@ export N_WORKERS=1
 source venv/bin/activate
 
 python rfp_gibbs_main.py configs/predict/deterministic-iterative-6h.json \
---device cuda \
-> output_gpu.log 2> error_gpu.log
+  --device cuda \
+  > output_gpu.log 2> error_gpu.log
