@@ -1,6 +1,5 @@
 #!/bin/bash
 #PBS -N gibbs_abc_gpu
-#PBS -q gpu72
 #PBS -l select=1:ncpus=4:mem=64gb:ngpus=1:gpu_type=L40S
 #PBS -l walltime=03:00:00
 #PBS -m abe
@@ -24,6 +23,7 @@ export N_WORKERS=1
 
 source venv/bin/activate
 
+exec > output_gpu.log 2> error_gpu.log
+
 python rfp_gibbs_main.py configs/predict/deterministic-iterative-6h.json \
-  --device cuda \
-  > output_gpu.log 2> error_gpu.log
+  --device cuda
