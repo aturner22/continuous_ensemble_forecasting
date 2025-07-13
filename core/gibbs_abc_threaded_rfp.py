@@ -14,44 +14,50 @@ from core.evaluation import (
 N_WORKERS = int(os.getenv("N_WORKERS", "16"))
 
 def generate_batched_ensemble(
-        model: Any,
-        previous_fields: torch.Tensor,
-        current_fields: torch.Tensor,
-        time_normalised: torch.Tensor,
-        reference_tensor: torch.Tensor,
-        variable_index: int,
-        alpha: float,
-        ensemble_size: int,
-        device: torch.device,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        N, C, H, W = previous_fields.shape
-        T = reference_tensor.shape[0]
+    model: Any,
+    previous_fields: torch.Tensor,
+    current_fields: torch.Tensor,
+    time_normalised: torch.Tensor,
+    reference_tensor: torch.Tensor,
+    variable_index: int,
+    alpha: float,
+    ensemble_size: int,
+    device: torch.device,
+    chunk_size: int = int(os.getenv("CHUNK_SIZE", "512")),
+) -> tuple[torch.Tensor, torch.Tensor]:
+    N, C, H, W = previous_fields.shape
+    T = reference_tensor.shape[0]
 
-        variable_fields = previous_fields[:, :-2].to(device)
-        static_fields = previous_fields[:, -2:].to(device)
-        base_tensor = variable_fields[:, variable_index]  # [N, H, W]
+    variable_fields = previous_fields[:, :-2].to(device)
+    static_fields = previous_fields[:, -2:].to(device)
+    base_tensor = variable_fields[:, variable_index]  # [N, H, W]
 
-        idx1 = torch.randint(0, T, (N, ensemble_size), device=device)
-        idx2 = torch.randint(0, T, (N, ensemble_size), device=device)
-        delta_fields = reference_tensor[idx1, variable_index] - reference_tensor[idx2, variable_index]  # [N, E, H, W]
-        perturbations = alpha * delta_fields  # [N, E, H, W]
+    idx1 = torch.randint(0, T, (N, ensemble_size), device=device)
+    idx2 = torch.randint(0, T, (N, ensemble_size), device=device)
+    delta_fields = reference_tensor[idx1, variable_index] - reference_tensor[idx2, variable_index]  # [N, E, H, W]
+    perturbations = alpha * delta_fields  # [N, E, H, W]
 
-        perturbed_fields = base_tensor.unsqueeze(1) + perturbations  # [N, E, H, W]
+    perturbed_fields = base_tensor.unsqueeze(1) + perturbations  # [N, E, H, W]
 
-        repeated_variable_fields = variable_fields.unsqueeze(1).expand(-1, ensemble_size, -1, -1, -1).clone()
-        repeated_variable_fields[:, :, variable_index] = perturbed_fields  # [N, E, V, H, W]
+    repeated_variable_fields = variable_fields.unsqueeze(1).expand(-1, ensemble_size, -1, -1, -1).clone()
+    repeated_variable_fields[:, :, variable_index] = perturbed_fields  # [N, E, V, H, W]
 
-        repeated_static_fields = static_fields.unsqueeze(1).expand(-1, ensemble_size, -1, -1, -1)  # [N, E, 2, H, W]
-        model_inputs = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2)  # [N, E, C, H, W]
+    repeated_static_fields = static_fields.unsqueeze(1).expand(-1, ensemble_size, -1, -1, -1)  # [N, E, 2, H, W]
+    model_inputs = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2)  # [N, E, C, H, W]
 
-        model_inputs = model_inputs.view(N * ensemble_size, C, H, W)  # [N*E, C, H, W]
-        time_inputs = time_normalised.unsqueeze(1).expand(-1, ensemble_size).reshape(-1, 1)  # [N*E, 1]
+    model_inputs = model_inputs.view(N * ensemble_size, C, H, W)  # [N*E, C, H, W]
+    time_inputs = time_normalised.unsqueeze(1).expand(-1, ensemble_size).reshape(-1, 1)  # [N*E, 1]
 
+    outputs = []
+    for start in range(0, model_inputs.size(0), chunk_size):
+        end = min(start + chunk_size, model_inputs.size(0))
         with torch.no_grad():
-            output = model(model_inputs, time_inputs).detach()  # [N*E, V, H, W]
+            chunk_output = model(model_inputs[start:end], time_inputs[start:end]).detach()
+        outputs.append(chunk_output)
 
-        output_reshaped = output.view(N, ensemble_size, -1, H, W).permute(1, 0, 2, 3, 4).contiguous()  # [E, N, V, H, W]
-        return output_reshaped, current_fields[:, variable_index].to(device)
+    output_full = torch.cat(outputs, dim=0)  # [N*E, V, H, W]
+    output_reshaped = output_full.view(N, ensemble_size, -1, H, W).permute(1, 0, 2, 3, 4).contiguous()  # [E, N, V, H, W]
+    return output_reshaped, current_fields[:, variable_index].to(device)
 
 def run_gibbs_abc_rfp(
     *,
