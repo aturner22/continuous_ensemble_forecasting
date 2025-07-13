@@ -1,9 +1,9 @@
 import torch
 import numpy as np
 import gc
+import os
 from typing import Any
 from tqdm import tqdm
-import os
 from concurrent.futures import ThreadPoolExecutor
 from core.evaluation import (
     continuous_ranked_probability_score,
@@ -11,7 +11,10 @@ from core.evaluation import (
     compute_mean_absolute_error,
     compute_ensemble_spread,
 )
+
+
 N_WORKERS = int(os.getenv("N_WORKERS", "16"))
+
 def generate_batched_ensemble(
     model: Any,
     variable_fields: torch.Tensor,
@@ -28,14 +31,19 @@ def generate_batched_ensemble(
     deltas = reference_tensor[idx_pairs[:, 0], variable_index] - reference_tensor[idx_pairs[:, 1], variable_index]
     perturbations = alpha * deltas.to(device)
 
-    perturbed = base_tensor.unsqueeze(0) + perturbations.unsqueeze(1)
-    repeated_variable_fields = variable_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
+    perturbed = base_tensor.unsqueeze(0) + perturbations[:, None]  # [E, N]
+    repeated_variable_fields = variable_fields[None, :, :].expand(ensemble_size, -1, -1).clone()
     repeated_variable_fields[:, :, variable_index] = perturbed
-    repeated_static_fields = static_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
-    inputs = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2)
+    repeated_static_fields = static_fields[None, :, :].expand(ensemble_size, -1, -1)
+
+    input_tensor = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2)
+    time_repeated = time_normalised[None, :].expand(ensemble_size, -1)
 
     with torch.no_grad():
-        return model(inputs, time_normalised.unsqueeze(0).repeat(ensemble_size, 1)).detach()
+        output = model(input_tensor, time_repeated).detach()
+
+    return output.to(device)
+
 
 def run_gibbs_abc_rfp(
     *,
@@ -58,10 +66,16 @@ def run_gibbs_abc_rfp(
     step_mean_crps = np.zeros(n_steps, dtype=np.float32)
 
     device = next(model.parameters()).device
+    reference_tensor = reference_tensor.to(device)
     current_parameter_matrix = np.random.uniform(low=1.0, high=5.0, size=(num_variables, 1))
+
+    print(f"[CUDA Warm-up]...")
+    _ = model(torch.zeros((1, *batches[0][0].shape[1:]), device=device), batches[0][2][None].to(device))
+    torch.cuda.synchronize()
 
     for step_index in tqdm(range(n_steps), desc="Gibbs Sampling Steps"):
         print(f"\n[Gibbs Step {step_index + 1}/{n_steps}]")
+
         for variable_index in range(num_variables):
             variable_name = variable_names[variable_index]
             print(f"  Optimizing variable: {variable_name} [{variable_index + 1}/{num_variables}]")
@@ -88,30 +102,34 @@ def run_gibbs_abc_rfp(
                 targets_buffer = [] if log_diagnostics else None
 
                 def evaluate_batch(batch):
-                    previous_fields, current_fields, time_normalised = batch
-                    variable_fields = previous_fields[:, :-2].to(device)
-                    static_fields = previous_fields[:, -2:].to(device)
-                    base_tensor = variable_fields[:, variable_index]
+                    try:
+                        previous_fields, current_fields, time_normalised = batch
+                        variable_fields = previous_fields[:, :-2].to(device)
+                        static_fields = previous_fields[:, -2:].to(device)
+                        base_tensor = variable_fields[:, variable_index]
 
-                    ensemble_tensor = generate_batched_ensemble(
-                        model, variable_fields, static_fields, base_tensor,
-                        time_normalised.to(device), reference_tensor,
-                        variable_index, alpha, ensemble_size, device
-                    )
+                        ensemble_tensor = generate_batched_ensemble(
+                            model, variable_fields, static_fields, base_tensor,
+                            time_normalised.to(device), reference_tensor,
+                            variable_index, alpha, ensemble_size, device
+                        )
 
-                    crps = continuous_ranked_probability_score(
-                        ensemble_tensor[:, :, variable_index],
-                        current_fields[:, variable_index].to(device)
-                    )
-                    ranks = compute_rank_histogram(
-                        ensemble_tensor[:, :, variable_index],
-                        current_fields[:, variable_index].to(device),
-                        ensemble_size
-                    )
+                        crps = continuous_ranked_probability_score(
+                            ensemble_tensor[:, :, variable_index],
+                            current_fields[:, variable_index].to(device)
+                        )
+                        ranks = compute_rank_histogram(
+                            ensemble_tensor[:, :, variable_index],
+                            current_fields[:, variable_index].to(device),
+                            ensemble_size
+                        )
 
-                    if log_diagnostics:
-                        return crps, ranks, ensemble_tensor[:, :, variable_index].clone(), current_fields[:, variable_index].clone()
-                    return crps, ranks, None, None
+                        if log_diagnostics:
+                            return crps, ranks, ensemble_tensor[:, :, variable_index].clone(), current_fields[:, variable_index].clone()
+                        return crps, ranks, None, None
+                    except Exception as e:
+                        print(f"[Thread Error] {e}")
+                        raise
 
                 with ThreadPoolExecutor(max_workers=N_WORKERS) as pool:
                     results = list(pool.map(evaluate_batch, batches))
