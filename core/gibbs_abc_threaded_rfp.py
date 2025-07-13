@@ -10,6 +10,8 @@ from core.evaluation import (
     compute_ensemble_spread,
 )
 
+PROPOSAL_SCALE=0.05
+
 def estimate_safe_chunk_size(
     num_input_channels: int,
     num_output_channels: int,
@@ -119,11 +121,11 @@ def run_gibbs_abc_rfp(
             variable_name = variable_names[variable_index]
             print(f"  Optimizing variable: {variable_name} [{variable_index + 1}/{num_variables}]")
 
-            proposal_matrix = np.abs(np.random.normal(
+            proposal_matrix = np.random.normal(
                 loc=current_parameter_matrix[variable_index],
-                scale=0.5,
+                scale=PROPOSAL_SCALE,
                 size=(n_proposals, 1),
-            ))
+            )
 
             best_crps_value = float("inf")
             best_parameter_vector = current_parameter_matrix[variable_index].copy()

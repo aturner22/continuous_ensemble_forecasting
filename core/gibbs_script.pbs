@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -N gibbs_abc_gpu
 #PBS -l select=1:ncpus=16:mem=64gb:ngpus=1:gpu_type=L40S
-#PBS -l walltime=03:00:00
+#PBS -l walltime=24:00:00
 #PBS -m abe
 #PBS -k n
 #PBS -j oe
