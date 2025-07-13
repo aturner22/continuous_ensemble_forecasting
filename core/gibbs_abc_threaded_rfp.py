@@ -1,7 +1,7 @@
 import torch
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+from tqdm import tqdm
 from core.evaluation import (
     continuous_ranked_probability_score,
     compute_rank_histogram,
@@ -10,7 +10,6 @@ from core.evaluation import (
 )
 from core.parallel_utils import parallel_map
 import gc
-import os
 
 def generate_ensemble_member(
     model: Any,
@@ -26,12 +25,11 @@ def generate_ensemble_member(
     idx1, idx2 = np.random.choice(reference_tensor.shape[0], size=2, replace=False)
     delta_field = reference_tensor[idx1, variable_index] - reference_tensor[idx2, variable_index]
     perturbation = alpha * delta_field.to(device)
-
     perturbed_tensor = base_tensor + perturbation
-    input_tensor = torch.cat([
-        variable_fields.clone().index_copy(1, torch.tensor([variable_index], device=device), perturbed_tensor.unsqueeze(1)),
-        static_fields
-    ], dim=1)
+
+    modified_variable_fields = variable_fields.clone()
+    modified_variable_fields[:, variable_index] = perturbed_tensor
+    input_tensor = torch.cat([modified_variable_fields, static_fields], dim=1)
 
     with torch.no_grad():
         return model(input_tensor, time_normalised).detach()
@@ -78,11 +76,15 @@ def run_gibbs_abc_rfp(
     device = next(model.parameters()).device
     current_parameter_matrix = np.random.uniform(low=1.0, high=5.0, size=(num_variables, 1))
 
-    for step_index in range(n_steps):
+    for step_index in tqdm(range(n_steps), desc="Gibbs Sampling Steps"):
+        print(f"\n[Gibbs Step {step_index + 1}/{n_steps}]")
         for variable_index in range(num_variables):
+            variable_name = variable_names[variable_index]
+            print(f"  Optimizing variable: {variable_name} [{variable_index + 1}/{num_variables}]")
+
             proposal_matrix = np.abs(np.random.normal(
                 loc=current_parameter_matrix[variable_index],
-                scale=[0.5],
+                scale=0.5,
                 size=(n_proposals, 1),
             ))
 
@@ -94,13 +96,14 @@ def run_gibbs_abc_rfp(
 
             for proposal_index in range(n_proposals):
                 alpha = proposal_matrix[proposal_index][0]
+                print(f"    Proposal {proposal_index + 1}/{n_proposals} (alpha = {alpha:.4f})")
 
                 crps_values = []
                 rank_arrays = []
                 members_buffer = [] if log_diagnostics else None
                 targets_buffer = [] if log_diagnostics else None
 
-                for previous_fields, current_fields, time_normalised in batches:
+                for batch_idx, (previous_fields, current_fields, time_normalised) in enumerate(batches):
                     variable_fields = previous_fields[:, :-2].to(device)
                     static_fields = previous_fields[:, -2:].to(device)
                     base_tensor = variable_fields[:, variable_index]
@@ -111,15 +114,18 @@ def run_gibbs_abc_rfp(
                             base_tensor, time_normalised,
                             reference_tensor, variable_index,
                             alpha, device
-                        ) for _ in range(ensemble_size)
+                        )
+                        for _ in range(ensemble_size)
                     ]
 
                     ensemble_members = list(parallel_map(lambda args: generate_ensemble_member(*args), args_list))
                     ensemble_tensor = torch.stack(ensemble_members, dim=0)
 
-
                     crps, ranks = compute_crps_and_ranks(
-                        ensemble_tensor, current_fields.to(device), variable_index, ensemble_size
+                        ensemble_tensor,
+                        current_fields.to(device),
+                        variable_index,
+                        ensemble_size
                     )
 
                     crps_values.append(crps)
@@ -129,10 +135,12 @@ def run_gibbs_abc_rfp(
                         members_buffer.append(ensemble_tensor[:, :, variable_index].clone())
                         targets_buffer.append(current_fields[:, variable_index].clone())
 
-                    del ensemble_members, ensemble_tensor, variable_fields, static_fields, base_tensor
+                    del ensemble_members, ensemble_tensor
+                    del variable_fields, static_fields, base_tensor
                     gc.collect()
 
                 crps_mean = torch.mean(torch.stack(crps_values)).item()
+                print(f"      Mean CRPS: {crps_mean:.6f}")
 
                 if crps_mean < best_crps_value:
                     best_crps_value = crps_mean
@@ -163,7 +171,7 @@ def run_gibbs_abc_rfp(
             gc.collect()
 
         step_mean_crps[step_index] = posterior_crps[step_index].mean()
-        print(f"Time-averaged CRPS after Gibbs step {step_index + 1:02d}: {step_mean_crps[step_index]:.6f}")
+        print(f"Completed step {step_index + 1}: mean CRPS = {step_mean_crps[step_index]:.6f}")
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
