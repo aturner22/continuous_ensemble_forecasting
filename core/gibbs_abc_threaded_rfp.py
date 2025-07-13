@@ -77,7 +77,7 @@ def run_gibbs_abc_rfp(
     reference_tensor = reference_tensor.to(device)
     current_parameter_matrix = np.random.uniform(low=1.0, high=5.0, size=(num_variables, 1))
 
-    print(f"[CUDA Warm-up]...")
+    print(f"CUDA Warm-up...")
     _ = model(torch.zeros((1, *batches[0][0].shape[1:]), device=device), batches[0][2][None].to(device))
     torch.cuda.synchronize()
 
