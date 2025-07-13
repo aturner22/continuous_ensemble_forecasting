@@ -37,16 +37,23 @@ def produce_trace_and_histogram_plots(samples: np.ndarray, output_directory: Pat
 def produce_rank_histograms(histograms, output_directory: Path, variable_names, ensemble_size: int):
     for variable_index, ranks in enumerate(histograms):
         plt.figure(figsize=(8, 4))
-        plt.hist(
-            ranks,
-            bins=ensemble_size + 1,
-            range=(0, 1),
-            density=True,
-            edgecolor="black",
-        )
+        bins = np.arange(ensemble_size + 2) - 0.5
+        plt.hist(ranks * ensemble_size, bins=bins, density=True, edgecolor="black")
+
         plt.title(f"Rank histogram {variable_names[variable_index]}")
         plt.xlabel("Normalised rank")
         plt.ylabel("Density")
         plt.tight_layout()
         plt.savefig(output_directory / f"rank_hist_{variable_names[variable_index]}.png")
         plt.close()
+
+def plot_crps_trace(crps_array: np.ndarray, save_path: Path) -> None:
+    plt.figure(figsize=(8, 4))
+    plt.plot(crps_array)
+    plt.xlabel("Gibbs iteration")
+    plt.ylabel("Mean CRPS")
+    plt.title("CRPS Trace")
+    plt.tight_layout()
+    plt.savefig(save_path / "crps_trace.png", dpi=300)
+    plt.close()
+

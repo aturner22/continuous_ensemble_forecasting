@@ -13,7 +13,7 @@ if __name__ == "__main__":
     )
     from core.io_utils import prepare_model_and_loader, save_posterior_statistics
     from core.helpers import materialise_batches, print_computing_configuration
-    from core.plotting import produce_trace_and_histogram_plots, produce_rank_histograms
+    from core.plotting import produce_trace_and_histogram_plots, produce_rank_histograms, plot_crps_trace
     from core.diagnostics import print_posterior_summary
     from core.gibbs_abc_threaded_rfp import run_gibbs_abc_rfp
 
@@ -80,9 +80,6 @@ if __name__ == "__main__":
         max_horizon=MAX_HORIZON,
         reference_tensor=full_tensor,
     )
-    del full_tensor
-    gc.collect()
-    torch.cuda.empty_cache()
 
     print("Saving posterior results...")
     save_posterior_statistics(results, result_path)
@@ -90,6 +87,8 @@ if __name__ == "__main__":
     print("Generating posterior plots...")
     produce_trace_and_histogram_plots(results["posterior_samples"], result_path, VARIABLE_NAMES, ["alpha_scale"])
     produce_rank_histograms(results["rank_histograms"], result_path, VARIABLE_NAMES, ENSEMBLE_SIZE)
+    plot_crps_trace(results["step_mean_crps"], result_path)
+
 
     print("Final posterior parameter summary:")
     print_posterior_summary(results["posterior_mean"], results["posterior_variance"], VARIABLE_NAMES, ["alpha_scale"])
@@ -141,3 +140,7 @@ if __name__ == "__main__":
             lon=longitude,
             save_prefix=result_path / f"ensemble_stats_{var_name}"
         )
+
+    del full_tensor
+    gc.collect()
+    torch.cuda.empty_cache()
