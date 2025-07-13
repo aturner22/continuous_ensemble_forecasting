@@ -1,19 +1,19 @@
 import torch
 import numpy as np
+import gc
 from typing import Any
 from tqdm import tqdm
+import os
+from concurrent.futures import ThreadPoolExecutor
 from core.evaluation import (
     continuous_ranked_probability_score,
     compute_rank_histogram,
     compute_mean_absolute_error,
     compute_ensemble_spread,
 )
-import gc
-
-
+N_WORKERS = os.getenv("N_WORKERS", "16")
 def generate_batched_ensemble(
-    *,
-    model: torch.nn.Module,
+    model: Any,
     variable_fields: torch.Tensor,
     static_fields: torch.Tensor,
     base_tensor: torch.Tensor,
@@ -24,65 +24,18 @@ def generate_batched_ensemble(
     ensemble_size: int,
     device: torch.device,
 ) -> torch.Tensor:
-    batch_size = variable_fields.shape[0]
-    tensor_shape = base_tensor.shape[1:]  # For broadcasting spatial dims if present
-
     idx_pairs = np.random.randint(0, reference_tensor.shape[0], size=(ensemble_size, 2))
     deltas = reference_tensor[idx_pairs[:, 0], variable_index] - reference_tensor[idx_pairs[:, 1], variable_index]
-    deltas = torch.tensor(deltas, dtype=base_tensor.dtype, device=device).view(ensemble_size, *tensor_shape)
-    perturbations = alpha * deltas
+    perturbations = alpha * deltas.to(device)
 
-    # Expand base tensor to ensemble shape
-    base_tensor_expanded = base_tensor.unsqueeze(0).expand(ensemble_size, -1, *tensor_shape)
-    perturbed_tensor = base_tensor_expanded + perturbations
-
-    # Repeat other inputs
-    if variable_fields.dim() == 3:
-        repeated_variable_fields = variable_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
-        repeated_static_fields = static_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
-    elif variable_fields.dim() == 4:
-        repeated_variable_fields = variable_fields.unsqueeze(0).repeat(ensemble_size, 1, 1, 1)
-        repeated_static_fields = static_fields.unsqueeze(0).repeat(ensemble_size, 1, 1, 1)
-    else:
-        raise ValueError(f"Unsupported tensor shape for variable_fields: {variable_fields.shape}")
-
-    # Replace variable index
-    index_tensor = torch.tensor([variable_index], device=device)
-    if variable_fields.dim() == 3:
-        repeated_variable_fields[:, :, variable_index] = perturbed_tensor
-    else:
-        repeated_variable_fields.index_copy_(2, index_tensor, perturbed_tensor.transpose(1, 2))
-
-    # Concatenate input and evaluate
-    input_tensor = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2 if variable_fields.dim() == 3 else 1)
+    perturbed = base_tensor.unsqueeze(0) + perturbations.unsqueeze(1)
+    repeated_variable_fields = variable_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
+    repeated_variable_fields[:, :, variable_index] = perturbed
+    repeated_static_fields = static_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
+    inputs = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2)
 
     with torch.no_grad():
-        if time_normalised.dim() == 2:
-            repeated_time = time_normalised.unsqueeze(0).repeat(ensemble_size, 1)
-        else:
-            repeated_time = time_normalised.unsqueeze(0).repeat(ensemble_size, 1, 1)
-
-        output_tensor = model(input_tensor, repeated_time).detach()
-
-    return output_tensor  # shape: [E, B, V, H, W] or [E, B, V, D]
-
-def compute_crps_and_ranks(
-    ensemble_tensor: torch.Tensor,
-    ground_truth: torch.Tensor,
-    variable_index: int,
-    ensemble_size: int,
-) -> tuple[torch.Tensor, np.ndarray]:
-    crps = continuous_ranked_probability_score(
-        ensemble_tensor[:, :, variable_index],
-        ground_truth[:, variable_index],
-    )
-    ranks = compute_rank_histogram(
-        ensemble_tensor[:, :, variable_index],
-        ground_truth[:, variable_index],
-        ensemble_size,
-    )
-    return crps, ranks
-
+        return model(inputs, time_normalised.unsqueeze(0).repeat(ensemble_size, 1)).detach()
 
 def run_gibbs_abc_rfp(
     *,
@@ -134,40 +87,42 @@ def run_gibbs_abc_rfp(
                 members_buffer = [] if log_diagnostics else None
                 targets_buffer = [] if log_diagnostics else None
 
-                for batch_idx, (previous_fields, current_fields, time_normalised) in enumerate(batches):
+                def evaluate_batch(batch):
+                    previous_fields, current_fields, time_normalised = batch
                     variable_fields = previous_fields[:, :-2].to(device)
                     static_fields = previous_fields[:, -2:].to(device)
                     base_tensor = variable_fields[:, variable_index]
 
                     ensemble_tensor = generate_batched_ensemble(
-                        model=model,
-                        variable_fields=variable_fields,
-                        static_fields=static_fields,
-                        base_tensor=base_tensor,
-                        time_normalised=time_normalised,
-                        reference_tensor=reference_tensor,
-                        variable_index=variable_index,
-                        alpha=alpha,
-                        ensemble_size=ensemble_size,
-                        device=device,
+                        model, variable_fields, static_fields, base_tensor,
+                        time_normalised.to(device), reference_tensor,
+                        variable_index, alpha, ensemble_size, device
                     )
 
-                    crps, ranks = compute_crps_and_ranks(
-                        ensemble_tensor,
-                        current_fields.to(device),
-                        variable_index,
+                    crps = continuous_ranked_probability_score(
+                        ensemble_tensor[:, :, variable_index],
+                        current_fields[:, variable_index].to(device)
+                    )
+                    ranks = compute_rank_histogram(
+                        ensemble_tensor[:, :, variable_index],
+                        current_fields[:, variable_index].to(device),
                         ensemble_size
                     )
 
+                    if log_diagnostics:
+                        return crps, ranks, ensemble_tensor[:, :, variable_index].clone(), current_fields[:, variable_index].clone()
+                    return crps, ranks, None, None
+
+                with ThreadPoolExecutor(max_workers=N_WORKERS) as pool:
+                    results = list(pool.map(evaluate_batch, batches))
+
+                for result in results:
+                    crps, ranks, member, target = result
                     crps_values.append(crps)
                     rank_arrays.append(ranks)
-
                     if log_diagnostics:
-                        members_buffer.append(ensemble_tensor[:, :, variable_index].clone())
-                        targets_buffer.append(current_fields[:, variable_index].clone())
-
-                    del ensemble_tensor, variable_fields, static_fields, base_tensor
-                    gc.collect()
+                        members_buffer.append(member)
+                        targets_buffer.append(target)
 
                 crps_mean = torch.mean(torch.stack(crps_values)).item()
                 print(f"      Mean CRPS: {crps_mean:.6f}")
@@ -187,9 +142,7 @@ def run_gibbs_abc_rfp(
             rank_histograms[variable_index].extend(best_ranks)
 
             if log_diagnostics and best_members is not None:
-                spread_value = np.mean([
-                    compute_ensemble_spread(m) for m in best_members
-                ])
+                spread_value = np.mean([compute_ensemble_spread(m) for m in best_members])
                 error_value = np.mean([
                     compute_mean_absolute_error(m, t)
                     for m, t in zip(best_members, best_targets)
