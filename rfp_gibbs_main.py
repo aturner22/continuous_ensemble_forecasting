@@ -16,6 +16,7 @@ if __name__ == "__main__":
     from core.plotting import produce_trace_and_histogram_plots, produce_rank_histograms, plot_crps_trace
     from core.diagnostics import print_posterior_summary
     from core.gibbs_abc_threaded_rfp import run_gibbs_abc_rfp
+    from core.plotting_rfp import plot_ensemble_statistics
 
     print("Initializing device...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -49,7 +50,6 @@ if __name__ == "__main__":
 
     mean_data = torch.tensor([norm_stats[k]["mean"] for k in VARIABLE_NAMES], dtype=torch.float32)
     std_data = torch.tensor([norm_stats[k]["std"] for k in VARIABLE_NAMES], dtype=torch.float32)
-    
 
     print("Loading full reference ERA5 dataset (memmap)...")
     full_array = np.memmap(
@@ -68,79 +68,75 @@ if __name__ == "__main__":
         full_tensor = full_tensor.pin_memory()
     torch.cuda.empty_cache()
 
-    print("Commencing ABC-Gibbs inference with RFP perturbations...")
-    results = run_gibbs_abc_rfp(
-        model=model,
-        batches=cached_batches,
-        ensemble_size=ENSEMBLE_SIZE,
-        n_steps=N_GIBBS_STEPS,
-        n_proposals=N_PROPOSALS_PER_VARIABLE,
-        num_variables=NUM_VARIABLES,
-        variable_names=VARIABLE_NAMES,
-        max_horizon=MAX_HORIZON,
-        reference_tensor=full_tensor,
-    )
-
-    print("Saving posterior results...")
-    save_posterior_statistics(results, result_path)
-
-    print("Generating posterior plots...")
-    produce_trace_and_histogram_plots(results["posterior_samples"], result_path, VARIABLE_NAMES, ["alpha_scale"])
-    produce_rank_histograms(results["rank_histograms"], result_path, VARIABLE_NAMES, ENSEMBLE_SIZE)
-    plot_crps_trace(results["step_mean_crps"], result_path)
-
-
-    print("Final posterior parameter summary:")
-    print_posterior_summary(results["posterior_mean"], results["posterior_variance"], VARIABLE_NAMES, ["alpha_scale"])
-
-    print("ABC-Gibbs with RFP complete.")
-
-    from core.plotting_rfp import plot_rfp_noise_field, plot_ensemble_statistics
-
-    # Visualize perturbation field for variable 2 (e.g., t2m)
-    print("Visualizing ensemble statistics at final Gibbs step...")
-    final_step = -1
-    final_ensemble = results["posterior_samples"][final_step]
-    alpha_vec = final_ensemble[:, 0]
-
-    from core.constants import VARIABLE_NAMES
-    from core.plotting_rfp import plot_ensemble_statistics
-
-    for var_idx, var_name in enumerate(VARIABLE_NAMES):
-        alpha = alpha_vec[var_idx]
-        example_field = cached_batches[0][0][0, var_idx]
-
-        members = []
-        for _ in range(ENSEMBLE_SIZE):
-            τ1, τ2 = np.random.choice(full_tensor.shape[0], size=2, replace=False)
-            delta_Y = full_tensor[τ1, var_idx] - full_tensor[τ2, var_idx]
-            noise = alpha * delta_Y.to(example_field.device)
-            perturbed = example_field + noise
-
-            full_input = cached_batches[0][0].clone()
-            variable_tensor = full_input[:, :-2]
-            static_tensor = full_input[:, -2:]
-            variable_tensor[0, var_idx] = perturbed
-            input_tensor = torch.cat([variable_tensor, static_tensor], dim=1)
-
-            output = model(input_tensor, cached_batches[0][2])
-            members.append(output)
-
-        ensemble_tensor = torch.stack(members, dim=0).squeeze(1)  # [E, V, H, W]
-        target = cached_batches[0][1]
-
-        std_field = ensemble_tensor.std(dim=0)[var_idx].detach().cpu().numpy()
-        print(f"Std Dev [{var_name}]: min = {std_field.min():.4f}, max = {std_field.max():.4f}, mean = {std_field.mean():.4f}")
-
-        plot_ensemble_statistics(
-            ensemble_tensor,
-            target,
-            variable_index=var_idx,
-            lat=latitude,
-            lon=longitude,
-            save_prefix=result_path / f"ensemble_stats_{var_name}"
+    try:
+        print("Commencing ABC-Gibbs inference with RFP perturbations...")
+        results = run_gibbs_abc_rfp(
+            model=model,
+            batches=cached_batches,
+            ensemble_size=ENSEMBLE_SIZE,
+            n_steps=N_GIBBS_STEPS,
+            n_proposals=N_PROPOSALS_PER_VARIABLE,
+            num_variables=NUM_VARIABLES,
+            variable_names=VARIABLE_NAMES,
+            max_horizon=MAX_HORIZON,
+            reference_tensor=full_tensor,
         )
 
-    del full_tensor
-    gc.collect()
-    torch.cuda.empty_cache()
+        print("Saving posterior results...")
+        save_posterior_statistics(results, result_path)
+
+        print("Generating posterior plots...")
+        produce_trace_and_histogram_plots(results["posterior_samples"], result_path, VARIABLE_NAMES, ["alpha_scale"])
+        produce_rank_histograms(results["rank_histograms"], result_path, VARIABLE_NAMES, ENSEMBLE_SIZE)
+        plot_crps_trace(results["step_mean_crps"], result_path)
+
+        print("Final posterior parameter summary:")
+        print_posterior_summary(results["posterior_mean"], results["posterior_variance"], VARIABLE_NAMES, ["alpha_scale"])
+
+        print("ABC-Gibbs with RFP complete.")
+
+        # print("Visualizing ensemble statistics at final Gibbs step...")
+        # final_step = -1
+        # final_ensemble = results["posterior_samples"][final_step]
+        # alpha_vec = final_ensemble[:, 0]
+
+        # with torch.no_grad():
+        #     for var_idx, var_name in enumerate(VARIABLE_NAMES):
+        #         alpha = alpha_vec[var_idx]
+        #         example_field = cached_batches[0][0][0, var_idx]
+
+        #         members = []
+        #         for _ in range(ENSEMBLE_SIZE):
+        #             τ1, τ2 = np.random.choice(full_tensor.shape[0], size=2, replace=False)
+        #             delta_Y = full_tensor[τ1, var_idx] - full_tensor[τ2, var_idx]
+        #             noise = alpha * delta_Y.to(example_field.device)
+        #             perturbed = example_field + noise
+
+        #             full_input = cached_batches[0][0].clone()
+        #             variable_tensor = full_input[:, :-2]
+        #             static_tensor = full_input[:, -2:]
+        #             variable_tensor[0, var_idx] = perturbed
+        #             input_tensor = torch.cat([variable_tensor, static_tensor], dim=1)
+
+        #             output = model(input_tensor, cached_batches[0][2])
+        #             members.append(output)
+
+        #         ensemble_tensor = torch.stack(members, dim=0).squeeze(1)  # [E, V, H, W]
+        #         target = cached_batches[0][1]
+
+        #         std_field = ensemble_tensor.std(dim=0)[var_idx].detach().cpu().numpy()
+        #         print(f"Std Dev [{var_name}]: min = {std_field.min():.4f}, max = {std_field.max():.4f}, mean = {std_field.mean():.4f}")
+
+        #         plot_ensemble_statistics(
+        #             ensemble_tensor,
+        #             target,
+        #             variable_index=var_idx,
+        #             lat=latitude,
+        #             lon=longitude,
+        #             save_prefix=result_path / f"ensemble_stats_{var_name}"
+        #         )
+
+    finally:
+        del full_tensor
+        gc.collect()
+        torch.cuda.empty_cache()
