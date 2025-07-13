@@ -13,7 +13,7 @@ import gc
 
 def generate_batched_ensemble(
     *,
-    model: Any,
+    model: torch.nn.Module,
     variable_fields: torch.Tensor,
     static_fields: torch.Tensor,
     base_tensor: torch.Tensor,
@@ -24,22 +24,47 @@ def generate_batched_ensemble(
     ensemble_size: int,
     device: torch.device,
 ) -> torch.Tensor:
-    reference_count = reference_tensor.shape[0]
-    idx = np.random.choice(reference_count, size=(ensemble_size, 2), replace=True)
-    delta = reference_tensor[idx[:, 0], variable_index] - reference_tensor[idx[:, 1], variable_index]
-    perturbation = alpha * delta.to(device)
-    perturbed = base_tensor.unsqueeze(0) + perturbation.unsqueeze(1)
+    batch_size = variable_fields.shape[0]
+    tensor_shape = base_tensor.shape[1:]  # For broadcasting spatial dims if present
 
-    repeated_variable_fields = variable_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
-    repeated_static_fields = static_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
-    repeated_time = time_normalised.repeat(ensemble_size, 1)
+    idx_pairs = np.random.randint(0, reference_tensor.shape[0], size=(ensemble_size, 2))
+    deltas = reference_tensor[idx_pairs[:, 0], variable_index] - reference_tensor[idx_pairs[:, 1], variable_index]
+    deltas = torch.tensor(deltas, dtype=base_tensor.dtype, device=device).view(ensemble_size, *tensor_shape)
+    perturbations = alpha * deltas
 
-    repeated_variable_fields[:, :, variable_index] = perturbed
-    input_tensor = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2)
+    # Expand base tensor to ensemble shape
+    base_tensor_expanded = base_tensor.unsqueeze(0).expand(ensemble_size, -1, *tensor_shape)
+    perturbed_tensor = base_tensor_expanded + perturbations
+
+    # Repeat other inputs
+    if variable_fields.dim() == 3:
+        repeated_variable_fields = variable_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
+        repeated_static_fields = static_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
+    elif variable_fields.dim() == 4:
+        repeated_variable_fields = variable_fields.unsqueeze(0).repeat(ensemble_size, 1, 1, 1)
+        repeated_static_fields = static_fields.unsqueeze(0).repeat(ensemble_size, 1, 1, 1)
+    else:
+        raise ValueError(f"Unsupported tensor shape for variable_fields: {variable_fields.shape}")
+
+    # Replace variable index
+    index_tensor = torch.tensor([variable_index], device=device)
+    if variable_fields.dim() == 3:
+        repeated_variable_fields[:, :, variable_index] = perturbed_tensor
+    else:
+        repeated_variable_fields.index_copy_(2, index_tensor, perturbed_tensor.transpose(1, 2))
+
+    # Concatenate input and evaluate
+    input_tensor = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2 if variable_fields.dim() == 3 else 1)
 
     with torch.no_grad():
-        return model(input_tensor, repeated_time).detach()
+        if time_normalised.dim() == 2:
+            repeated_time = time_normalised.unsqueeze(0).repeat(ensemble_size, 1)
+        else:
+            repeated_time = time_normalised.unsqueeze(0).repeat(ensemble_size, 1, 1)
 
+        output_tensor = model(input_tensor, repeated_time).detach()
+
+    return output_tensor  # shape: [E, B, V, H, W] or [E, B, V, D]
 
 def compute_crps_and_ranks(
     ensemble_tensor: torch.Tensor,
