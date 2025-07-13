@@ -114,8 +114,9 @@ def run_gibbs_abc_rfp(
                         ) for _ in range(ensemble_size)
                     ]
 
-                    ensemble_members = parallel_map(lambda args: generate_ensemble_member(*args), args_list)
+                    ensemble_members = list(parallel_map(lambda args: generate_ensemble_member(*args), args_list))
                     ensemble_tensor = torch.stack(ensemble_members, dim=0)
+
 
                     crps, ranks = compute_crps_and_ranks(
                         ensemble_tensor, current_fields.to(device), variable_index, ensemble_size
