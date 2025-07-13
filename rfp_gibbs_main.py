@@ -12,13 +12,14 @@ if __name__ == "__main__":
         DATA_DIRECTORY, MODEL_DIRECTORY, RESULT_DIRECTORY
     )
     from core.io_utils import prepare_model_and_loader, save_posterior_statistics
-    from core.helpers import materialise_batches
+    from core.helpers import materialise_batches, print_computing_configuration
     from core.plotting import produce_trace_and_histogram_plots, produce_rank_histograms
     from core.diagnostics import print_posterior_summary
     from core.gibbs_abc_threaded_rfp import run_gibbs_abc_rfp
 
     print("Initializing device...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print_computing_configuration()
     print(f"Using device: {device}")
 
     print("Preparing model and data loader...")

@@ -22,7 +22,7 @@ export NUMEXPR_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 export TORCH_NUM_THREADS=1
 export N_WORKERS=16
-export PARALLEL_BACKEND=process
+export PARALLEL_BACKEND=thread
 
 source venv/bin/activate
 
