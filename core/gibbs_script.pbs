@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N gibbs_abc_gpu
-#PBS -l select=1:ncpus=16:mem=64gb:ngpus=1:gpu_type=L40S
+#PBS -l select=1:ncpus=32:mem=64gb:ngpus=1:gpu_type=L40S
 #PBS -l walltime=03:00:00
 #PBS -m abe
 #PBS -k n
@@ -21,7 +21,7 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 export TORCH_NUM_THREADS=1
-export N_WORKERS=16
+export N_WORKERS=32
 export PARALLEL_BACKEND=thread
 
 source venv/bin/activate
