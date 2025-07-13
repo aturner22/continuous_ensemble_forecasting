@@ -227,9 +227,11 @@ class FourierEmbedding(torch.nn.Module):
         self.register_buffer('freqs', torch.randn(num_channels // 2) * scale)
 
     def forward(self, x):
-        x = x.ger((2 * np.pi * self.freqs).to(x.dtype))
-        x = torch.cat([x.cos(), x.sin()], dim=1)
-        return x
+        x = x.view(-1, 1)  # Ensure shape [B, 1]
+        freqs = (2 * np.pi * self.freqs).to(dtype=x.dtype, device=x.device)  # Shape [F]
+        x_proj = x * freqs.view(1, -1)  # Shape [B, F]
+        return torch.cat([x_proj.cos(), x_proj.sin()], dim=1)  # Shape [B, 2F]
+
 
 #----------------------------------------------------------------------------
 # Reimplementation of the DDPM++ and NCSN++ architectures from the paper
