@@ -27,22 +27,35 @@ def generate_batched_ensemble(
     ensemble_size: int,
     device: torch.device,
 ) -> torch.Tensor:
+    B, C, H, W = variable_fields.shape
     idx_pairs = np.random.randint(0, reference_tensor.shape[0], size=(ensemble_size, 2))
-    deltas = reference_tensor[idx_pairs[:, 0], variable_index] - reference_tensor[idx_pairs[:, 1], variable_index]
-    perturbations = alpha * deltas.to(device)
 
-    perturbed = base_tensor.unsqueeze(0) + perturbations[:, None]  # [E, N]
-    repeated_variable_fields = variable_fields[None, :, :].expand(ensemble_size, -1, -1).clone()
-    repeated_variable_fields[:, :, variable_index] = perturbed
-    repeated_static_fields = static_fields[None, :, :].expand(ensemble_size, -1, -1)
+    delta_fields = reference_tensor[idx_pairs[:, 0], variable_index] - reference_tensor[idx_pairs[:, 1], variable_index]  # [E, H, W]
+    perturbations = alpha * delta_fields.to(device)  # [E, H, W]
 
-    input_tensor = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2)
-    time_repeated = time_normalised[None, :].expand(ensemble_size, -1)
+    base_tensor = base_tensor.squeeze(1)  # Ensure shape [B, H, W]
+
+    # Ensemble: [E, B, H, W]
+    perturbed_fields = base_tensor[None, :, :, :].expand(ensemble_size, -1, -1, -1) + perturbations[:, None, :, :]  # [E, B, H, W]
+
+    # Insert into variable field
+    repeated_variable_fields = variable_fields.unsqueeze(0).repeat(ensemble_size, 1, 1, 1, 1).contiguous()
+    repeated_variable_fields[:, :, variable_index] = perturbed_fields  # Replace channel
+
+    repeated_static_fields = static_fields.unsqueeze(0).repeat(ensemble_size, 1, 1, 1, 1)
+    model_inputs = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2)  # [E, B, C+2, H, W]
+
+    time_repeated = time_normalised.unsqueeze(0).repeat(ensemble_size, 1)  # [E, T]
+    time_repeated = time_repeated.view(ensemble_size, 1, -1).expand(-1, B, -1).reshape(ensemble_size * B, -1)
+
+    # Merge ensemble and batch dimensions
+    model_inputs = model_inputs.view(ensemble_size * B, model_inputs.size(2), H, W)
 
     with torch.no_grad():
-        output = model(input_tensor, time_repeated).detach()
+        output = model(model_inputs, time_repeated).detach()  # [E*B, C, H, W]
+    
+    return output.view(ensemble_size, B, -1, H, W).to(device)  # [E, B, C, H, W]
 
-    return output.to(device)
 
 
 def run_gibbs_abc_rfp(
