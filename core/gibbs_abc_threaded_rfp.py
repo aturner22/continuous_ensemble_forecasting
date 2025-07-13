@@ -8,10 +8,11 @@ from core.evaluation import (
     compute_mean_absolute_error,
     compute_ensemble_spread,
 )
-from core.parallel_utils import parallel_map
 import gc
 
-def generate_ensemble_member(
+
+def generate_batched_ensemble(
+    *,
     model: Any,
     variable_fields: torch.Tensor,
     static_fields: torch.Tensor,
@@ -20,19 +21,24 @@ def generate_ensemble_member(
     reference_tensor: torch.Tensor,
     variable_index: int,
     alpha: float,
+    ensemble_size: int,
     device: torch.device,
 ) -> torch.Tensor:
-    idx1, idx2 = np.random.choice(reference_tensor.shape[0], size=2, replace=False)
-    delta_field = reference_tensor[idx1, variable_index] - reference_tensor[idx2, variable_index]
-    perturbation = alpha * delta_field.to(device)
-    perturbed_tensor = base_tensor + perturbation
+    reference_count = reference_tensor.shape[0]
+    idx = np.random.choice(reference_count, size=(ensemble_size, 2), replace=True)
+    delta = reference_tensor[idx[:, 0], variable_index] - reference_tensor[idx[:, 1], variable_index]
+    perturbation = alpha * delta.to(device)
+    perturbed = base_tensor.unsqueeze(0) + perturbation.unsqueeze(1)
 
-    modified_variable_fields = variable_fields.clone()
-    modified_variable_fields[:, variable_index] = perturbed_tensor
-    input_tensor = torch.cat([modified_variable_fields, static_fields], dim=1)
+    repeated_variable_fields = variable_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
+    repeated_static_fields = static_fields.unsqueeze(0).repeat(ensemble_size, 1, 1)
+    repeated_time = time_normalised.repeat(ensemble_size, 1)
+
+    repeated_variable_fields[:, :, variable_index] = perturbed
+    input_tensor = torch.cat([repeated_variable_fields, repeated_static_fields], dim=2)
 
     with torch.no_grad():
-        return model(input_tensor, time_normalised).detach()
+        return model(input_tensor, repeated_time).detach()
 
 
 def compute_crps_and_ranks(
@@ -108,18 +114,18 @@ def run_gibbs_abc_rfp(
                     static_fields = previous_fields[:, -2:].to(device)
                     base_tensor = variable_fields[:, variable_index]
 
-                    args_list = [
-                        (
-                            model, variable_fields, static_fields,
-                            base_tensor, time_normalised,
-                            reference_tensor, variable_index,
-                            alpha, device
-                        )
-                        for _ in range(ensemble_size)
-                    ]
-
-                    ensemble_members = list(parallel_map(lambda args: generate_ensemble_member(*args), args_list))
-                    ensemble_tensor = torch.stack(ensemble_members, dim=0)
+                    ensemble_tensor = generate_batched_ensemble(
+                        model=model,
+                        variable_fields=variable_fields,
+                        static_fields=static_fields,
+                        base_tensor=base_tensor,
+                        time_normalised=time_normalised,
+                        reference_tensor=reference_tensor,
+                        variable_index=variable_index,
+                        alpha=alpha,
+                        ensemble_size=ensemble_size,
+                        device=device,
+                    )
 
                     crps, ranks = compute_crps_and_ranks(
                         ensemble_tensor,
@@ -135,8 +141,7 @@ def run_gibbs_abc_rfp(
                         members_buffer.append(ensemble_tensor[:, :, variable_index].clone())
                         targets_buffer.append(current_fields[:, variable_index].clone())
 
-                    del ensemble_members, ensemble_tensor
-                    del variable_fields, static_fields, base_tensor
+                    del ensemble_tensor, variable_fields, static_fields, base_tensor
                     gc.collect()
 
                 crps_mean = torch.mean(torch.stack(crps_values)).item()
