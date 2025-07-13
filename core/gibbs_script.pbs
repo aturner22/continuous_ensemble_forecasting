@@ -13,6 +13,7 @@ module load Python/3.10.4-GCCcore-11.3.0
 cd "$PBS_O_WORKDIR"
 
 rm -f output_gpu.log error_gpu.log
+rm -f gibbs_abc_gpu.o*
 
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
