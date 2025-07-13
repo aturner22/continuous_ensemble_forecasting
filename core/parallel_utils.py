@@ -121,10 +121,10 @@ def parallel_map(fn, iterable):
     """
     Resource-adaptive, fault-tolerant parallel map.
 
-    * **sequential**   – enforced when `N_WORKERS==1`
-    * **thread**       – default under low `RLIMIT_NOFILE`
-    * **process**      – shared-memory, uses torch ‘file_system’ strategy
-    * **ray**          – distributed cluster when requested/available
+    * **sequential**    enforced when `N_WORKERS==1`
+    * **thread**        default under low `RLIMIT_NOFILE`
+    * **process**       shared-memory, uses torch file_system strategy
+    * **ray**           distributed cluster when requested/available
 
     On `OSError [Errno 24]` (FD exhaustion) the backend downgrades once
     from **process**→**thread** and transparently retries.

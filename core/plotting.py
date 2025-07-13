@@ -10,7 +10,7 @@ def produce_trace_and_histogram_plots(samples: np.ndarray, output_directory: Pat
         plt.figure(figsize=(10, 6))
         for variable_index in range(num_variables):
             plt.plot(samples[:, variable_index, parameter_index], label=variable_names[variable_index])
-        plt.title(f"Trace – {parameter_labels[parameter_index]}")
+        plt.title(f"Trace {parameter_labels[parameter_index]}")
         plt.xlabel("Gibbs iteration")
         plt.ylabel(parameter_labels[parameter_index])
         plt.legend()
@@ -27,7 +27,7 @@ def produce_trace_and_histogram_plots(samples: np.ndarray, output_directory: Pat
                 label=variable_names[variable_index],
                 density=True,
             )
-        plt.title(f"Posterior – {parameter_labels[parameter_index]}")
+        plt.title(f"Posterior {parameter_labels[parameter_index]}")
         plt.xlabel(parameter_labels[parameter_index])
         plt.legend()
         plt.tight_layout()
@@ -44,7 +44,7 @@ def produce_rank_histograms(histograms, output_directory: Path, variable_names, 
             density=True,
             edgecolor="black",
         )
-        plt.title(f"Rank histogram – {variable_names[variable_index]}")
+        plt.title(f"Rank histogram {variable_names[variable_index]}")
         plt.xlabel("Normalised rank")
         plt.ylabel("Density")
         plt.tight_layout()
