@@ -11,6 +11,23 @@ from core.evaluation import (
 from core.parallel_utils import parallel_map
 import gc
 
+def generate_ensemble_member(args):
+    model, variable_fields, static_fields, base_tensor, time_normalised, reference_tensor, variable_index, alpha, device = args
+
+    idx1, idx2 = np.random.choice(reference_tensor.shape[0], size=2, replace=False)
+    delta_field = reference_tensor[idx1, variable_index] - reference_tensor[idx2, variable_index]
+    perturbation = alpha * delta_field.to(device)
+    perturbed_tensor = base_tensor + perturbation
+
+    variable_fields_clone = variable_fields.clone()
+    variable_fields_clone[:, variable_index] = perturbed_tensor
+    input_tensor = torch.cat([variable_fields_clone, static_fields], dim=1)
+    
+    with torch.no_grad():
+        return model(input_tensor, time_normalised).detach()
+
+
+
 def run_gibbs_abc_rfp(
     *,
     model: Any,
@@ -61,18 +78,14 @@ def run_gibbs_abc_rfp(
                     static_fields = previous_fields[:, -2:]
                     base_tensor = variable_fields[:, variable_index]
 
-                    def generate_member(_):
-                        idx1, idx2 = np.random.choice(num_reference_samples, size=2, replace=False)
-                        delta_field = reference_tensor[idx1, variable_index] - reference_tensor[idx2, variable_index]
-                        perturbation = alpha * delta_field.to(base_tensor.device)
-                        perturbed_tensor = base_tensor + perturbation
 
-                        variable_fields_clone = variable_fields.clone()
-                        variable_fields_clone[:, variable_index] = perturbed_tensor
-                        input_tensor = torch.cat([variable_fields_clone, static_fields], dim=1)
-                        return model(input_tensor, time_normalised).detach()
+                    args_list = [
+                        (model, variable_fields, static_fields, base_tensor, time_normalised,
+                        reference_tensor, variable_index, alpha, base_tensor.device)
+                        for _ in range(ensemble_size)
+                    ]
 
-                    ensemble_members = list(parallel_map(generate_member, range(ensemble_size)))
+                    ensemble_members = list(parallel_map(generate_ensemble_member, args_list))
                     ensemble_tensor = torch.stack(ensemble_members, dim=0)
 
                     crps = continuous_ranked_probability_score(
