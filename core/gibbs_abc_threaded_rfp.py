@@ -11,7 +11,7 @@ from core.evaluation import (
     compute_mean_absolute_error,
     compute_ensemble_spread,
 )
-N_WORKERS = os.getenv("N_WORKERS", "16")
+N_WORKERS = int(os.getenv("N_WORKERS", "16"))
 def generate_batched_ensemble(
     model: Any,
     variable_fields: torch.Tensor,
