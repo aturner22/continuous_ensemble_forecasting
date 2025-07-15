@@ -1,10 +1,11 @@
 if __name__ == "__main__":
     import os
+    import json
+    import gc
     import numpy as np
     import torch
-    import json
     from tqdm import tqdm
-    import gc
+    import psutil
 
     from core.constants import (
         SAMPLE_SIZE, ENSEMBLE_SIZE, N_GIBBS_STEPS, N_PROPOSALS_PER_VARIABLE,
@@ -51,19 +52,31 @@ if __name__ == "__main__":
     mean_data = torch.tensor([norm_stats[k]["mean"] for k in VARIABLE_NAMES], dtype=torch.float32)
     std_data = torch.tensor([norm_stats[k]["std"] for k in VARIABLE_NAMES], dtype=torch.float32)
 
-    print("Loading full reference ERA5 dataset (memmap)...")
-    full_array = np.memmap(
-        DATA_DIRECTORY / "z500_t850_t2m_u10_v10_1979-2018_5.625deg.npy",
-        dtype=np.float32,
-        mode='r',
-        shape=(350640, NUM_VARIABLES, len(latitude), len(longitude))
-    )
+    standardized_path = DATA_DIRECTORY / "z500_t850_t2m_u10_v10_standardized.npy"
+    raw_path = DATA_DIRECTORY / "z500_t850_t2m_u10_v10_1979-2018_5.625deg.npy"
 
-    print("Standardizing full ERA5 tensor...")
-    full_tensor = torch.tensor(full_array, dtype=torch.float32)
-    del full_array; gc.collect()
+    if standardized_path.exists():
+        print("Loading precomputed standardized ERA5 tensor...")
+        full_array = np.load(standardized_path, mmap_mode='r')
+        full_tensor = torch.from_numpy(full_array)
+    else:
+        print("Standardized tensor not found. Processing raw ERA5 dataset...")
 
-    full_tensor.sub_(mean_data[:, None, None]).div_(std_data[:, None, None])
+        total_timesteps = 350640
+        spatial_shape = (len(latitude), len(longitude))
+        shape = (total_timesteps, NUM_VARIABLES, *spatial_shape)
+
+        raw_array = np.memmap(raw_path, dtype=np.float32, mode='r', shape=shape)
+        full_tensor = torch.tensor(raw_array, dtype=torch.float32)
+        del raw_array
+        gc.collect()
+
+        print("Standardizing tensor...")
+        full_tensor.sub_(mean_data[:, None, None]).div_(std_data[:, None, None])
+
+        print("Saving standardized tensor for future runs...")
+        np.save(standardized_path, full_tensor.cpu().numpy())
+
     if device.type == "cuda":
         full_tensor = full_tensor.pin_memory()
     torch.cuda.empty_cache()
@@ -85,13 +98,54 @@ if __name__ == "__main__":
         print("Saving posterior results...")
         save_posterior_statistics(results, result_path)
 
+        # Proactive memory cleanup before plotting
+        print("Releasing memory before plotting...")
+        torch.cuda.empty_cache()
+        del full_tensor
+        del mean_data
+        del std_data
+        gc.collect()
+
+        results_to_keep = {
+            "posterior_samples": results["posterior_samples"],
+            "rank_histograms": results["rank_histograms"],
+            "step_mean_crps": results["step_mean_crps"],
+            "posterior_mean": results["posterior_mean"],
+            "posterior_variance": results["posterior_variance"],
+        }
+        del results
+        gc.collect()
+
         print("Generating posterior plots...")
-        produce_trace_and_histogram_plots(results["posterior_samples"], result_path, VARIABLE_NAMES, ["alpha_scale"])
-        produce_rank_histograms(results["rank_histograms"], result_path, VARIABLE_NAMES, ENSEMBLE_SIZE)
-        plot_crps_trace(results["step_mean_crps"], result_path)
+        produce_trace_and_histogram_plots(
+            results_to_keep["posterior_samples"],
+            result_path,
+            VARIABLE_NAMES,
+            ["alpha_scale"]
+        )
+        gc.collect()
+
+        produce_rank_histograms(
+            results_to_keep["rank_histograms"],
+            result_path,
+            VARIABLE_NAMES,
+            ENSEMBLE_SIZE
+        )
+        gc.collect()
+
+        plot_crps_trace(
+            results_to_keep["step_mean_crps"],
+            result_path
+        )
+        gc.collect()
 
         print("Final posterior parameter summary:")
-        print_posterior_summary(results["posterior_mean"], results["posterior_variance"], VARIABLE_NAMES, ["alpha_scale"])
+        print_posterior_summary(
+            results_to_keep["posterior_mean"],
+            results_to_keep["posterior_variance"],
+            VARIABLE_NAMES,
+            ["alpha_scale"]
+        )
 
         print("ABC-Gibbs with RFP complete.")
 
@@ -137,6 +191,7 @@ if __name__ == "__main__":
         #         )
 
     finally:
-        del full_tensor
+        # del full_tensor
         gc.collect()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()

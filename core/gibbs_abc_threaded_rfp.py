@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import psutil
 import gc
 from typing import Any
 from tqdm import tqdm
@@ -10,7 +11,7 @@ from core.evaluation import (
     compute_ensemble_spread,
 )
 
-PROPOSAL_SCALE=0.05
+PROPOSAL_SCALE = 0.05
 
 def estimate_safe_chunk_size(
     num_input_channels: int,
@@ -23,12 +24,14 @@ def estimate_safe_chunk_size(
     safety_factor: float = 32.0,
 ) -> int:
     if available_memory_bytes is None:
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA not available and no memory specified.")
-        reserved = torch.cuda.memory_reserved(0)
-        allocated = torch.cuda.memory_allocated(0)
-        total = torch.cuda.get_device_properties(0).total_memory
-        available_memory_bytes = total - max(reserved, allocated)
+        if torch.cuda.is_available():
+            reserved = torch.cuda.memory_reserved(0)
+            allocated = torch.cuda.memory_allocated(0)
+            total = torch.cuda.get_device_properties(0).total_memory
+            available_memory_bytes = total - max(reserved, allocated)
+        else:
+            virtual_mem = psutil.virtual_memory()
+            available_memory_bytes = virtual_mem.available
     spatial_size = height * width
     bytes_per_sample = (
         (num_input_channels + num_output_channels)
@@ -110,9 +113,12 @@ def run_gibbs_abc_rfp(
 
     current_parameter_matrix = np.random.uniform(low=1.0, high=5.0, size=(num_variables, 1))
 
-    print(f"[CUDA Warm-up]...")
-    _ = model(torch.zeros((1, *batches[0][0].shape[1:]), device=device), batches[0][2][None].to(device))
-    torch.cuda.synchronize()
+    print(f"[Device Warm-up]...")
+    dummy_input = torch.zeros((1, *batches[0][0].shape[1:]), device=device)
+    dummy_time = batches[0][2][None].to(device)
+    _ = model(dummy_input, dummy_time)
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
     for step_index in tqdm(range(n_steps), desc="Gibbs Sampling Steps"):
         print(f"\n[Gibbs Step {step_index + 1}/{n_steps}]")
