@@ -113,7 +113,7 @@ def run_gibbs_abc_rfp(
 
     current_parameter_matrix = np.random.uniform(low=1.0, high=5.0, size=(num_variables, 1))
 
-    print(f"[Device Warm-up]...")
+    print("[Device Warm-up]...")
     dummy_input = torch.zeros((1, *batches[0][0].shape[1:]), device=device)
     dummy_time = batches[0][2][None].to(device)
     _ = model(dummy_input, dummy_time)

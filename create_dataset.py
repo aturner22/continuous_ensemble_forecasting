@@ -178,7 +178,7 @@ for t in (ts):
     for i, var_name in enumerate(stds_dict):
         stds_dict[var_name].append(std_t[i].item())
 
-save_directory = f"data/residual_stds"
+save_directory = "data/residual_stds"
 os.makedirs(save_directory, exist_ok=True)
 
 for var_name, stds in stds_dict.items():

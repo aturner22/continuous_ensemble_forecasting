@@ -1,23 +1,19 @@
 if __name__ == "__main__":
-    import os
     import json
     import gc
     import numpy as np
     import torch
     from tqdm import tqdm
-    import psutil
 
     from core.constants import (
         SAMPLE_SIZE, ENSEMBLE_SIZE, N_GIBBS_STEPS, N_PROPOSALS_PER_VARIABLE,
         VARIABLE_NAMES, NUM_VARIABLES, NUM_STATIC_FIELDS, MAX_HORIZON,
         DATA_DIRECTORY, MODEL_DIRECTORY, RESULT_DIRECTORY
     )
-    from core.io_utils import prepare_model_and_loader, save_posterior_statistics
-    from core.helpers import materialise_batches, print_computing_configuration
+    from core.io_utils import prepare_model_and_loader, save_posterior_statistics, materialise_batches, print_computing_configuration
     from core.plotting import produce_trace_and_histogram_plots, produce_rank_histograms, plot_crps_trace
-    from core.diagnostics import print_posterior_summary
+    from core.evaluation import print_posterior_summary
     from core.gibbs_abc_threaded_rfp import run_gibbs_abc_rfp
-    from core.plotting_rfp import plot_ensemble_statistics
 
     print("Initializing device...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

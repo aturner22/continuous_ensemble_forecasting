@@ -9,7 +9,7 @@ import json
 import argparse
 
 from utils import ERA5Dataset
-from loss import DetPrecond
+from archive.loss import DetPrecond
 
 
 def prepare_model_and_loader(
@@ -24,7 +24,6 @@ def prepare_model_and_loader(
     random_subset_size: int = None,
     random_subset_seed: int = 42,
 ):
-    import argparse
 
     parser = argparse.ArgumentParser(description='Run model with configuration from JSON file.')
     parser.add_argument('config_path', type=str, help='Path to JSON configuration file.')

@@ -1,5 +1,16 @@
 import torch
 
+def print_posterior_summary(posterior_mean, posterior_variance, variable_names, parameter_labels):
+    print("\nPosterior parameter moments:")
+    print("---------------------------")
+    for variable_index, variable in enumerate(variable_names):
+        print(f"{variable}:")
+        for parameter_index, label in enumerate(parameter_labels):
+            μ = posterior_mean[variable_index, parameter_index]
+            sigma2 = posterior_variance[variable_index, parameter_index]
+            print(f"  {label}: μ = {μ:+.4f}, σ² = {sigma2:.4e}")
+
+
 def continuous_ranked_probability_score(ensemble_tensor: torch.Tensor, target_field: torch.Tensor) -> torch.Tensor:
     absolute_error_term = torch.mean(torch.abs(ensemble_tensor - target_field.unsqueeze(0)))
     pairwise_differences = torch.abs(ensemble_tensor.unsqueeze(0) - ensemble_tensor.unsqueeze(1))
