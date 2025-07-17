@@ -9,7 +9,7 @@ import json
 import argparse
 
 from utils import ERA5Dataset
-from archive.loss import DetPrecond
+from diffusion_networks import DetPrecond
 
 
 def prepare_model_and_loader(
