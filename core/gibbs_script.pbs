@@ -1,5 +1,4 @@
 #!/bin/bash
-#PBS -q gpu72
 #PBS -N gibbs_abc_gpu
 #PBS -l select=1:ncpus=16:mem=64gb:ngpus=1:gpu_type=L40S
 #PBS -l walltime=0:15:00
