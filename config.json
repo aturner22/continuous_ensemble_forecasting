@@ -1,11 +1,11 @@
 {
-  "name": "gibbs_abc_test_rfp",
-  "description": "initial testing",
+  "name": "rfp_gibbs_abc_scale_up",
+  "description": "scaling up hyperparams to see effect on runtime and queue time",
 
-  "sample_size": 3,
-  "ensemble_size": 3,
-  "n_gibbs_steps": 3,
-  "n_proposals_per_variable": 3,
+  "sample_size": 1024,
+  "ensemble_size": 100,
+  "n_gibbs_steps": 5,
+  "n_proposals_per_variable": 5,
   "proposal_scale": 0.05,
 
   "n_universe_samples": 350640,
