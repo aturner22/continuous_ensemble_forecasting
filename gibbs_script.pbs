@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -N gibbs_abc_gpu
-#PBS -l select=1:ncpus=16:mem=32gb:ngpus=1:gpu_type=L40S
-#PBS -l walltime=0:05:00
+#PBS -l select=1:ncpus=16:mem=64gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=1:00:00
 #PBS -m abe
 #PBS -k n
 #PBS -j oe
@@ -38,11 +38,3 @@ export N_WORKERS=16
 export PARALLEL_BACKEND=thread
 
 python rfp_gibbs_main.py > "$RESULT_DIR/output_gpu.log" 2> "$RESULT_DIR/error_gpu.log"
-
-JOB_ID="${PBS_JOBID%%.*}"
-DEFAULT_PBS_OUTPUT_FILE="$PBS_O_WORKDIR/gibbs_abc_gpu.o${JOB_ID}"
-TARGET_PBS_OUTPUT_FILE="$RESULT_DIR/gibbs_abc_gpu.o${JOB_ID}"
-
-if [ -f "$DEFAULT_PBS_OUTPUT_FILE" ]; then
-    mv "$DEFAULT_PBS_OUTPUT_FILE" "$TARGET_PBS_OUTPUT_FILE"
-fi

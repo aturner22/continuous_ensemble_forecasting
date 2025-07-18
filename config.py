@@ -16,6 +16,7 @@ class Config:
 
         if timestamp is None:
             timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
         self.name: str = raw["name"] + "_" + timestamp
         self.sample_size: int = raw["sample_size"]
         self.ensemble_size: int = raw["ensemble_size"]
