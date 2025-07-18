@@ -4,13 +4,9 @@ if __name__ == "__main__":
     import numpy as np
     import torch
     from tqdm import tqdm
+    from config import Config
 
-    from core.constants import (
-        SAMPLE_SIZE, ENSEMBLE_SIZE, N_GIBBS_STEPS, N_PROPOSALS_PER_VARIABLE,
-        VARIABLE_NAMES, NUM_VARIABLES, NUM_STATIC_FIELDS, MAX_HORIZON,
-        DATA_DIRECTORY, MODEL_DIRECTORY, RESULT_DIRECTORY
-    )
-    from core.io_utils import prepare_model_and_loader, save_posterior_statistics, materialise_batches, print_computing_configuration
+    from core.io_utils import load_model_and_test_data, save_posterior_statistics, materialise_batches, print_computing_configuration
     from core.plotting import produce_trace_and_histogram_plots, produce_rank_histograms, plot_crps_trace
     from core.evaluation import print_posterior_summary
     from core.gibbs_abc_threaded_rfp import run_gibbs_abc_rfp
@@ -19,37 +15,26 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print_computing_configuration()
     print(f"Using device: {device}")
-
+    config = Config("config.json")
     print("Preparing model and data loader...")
-    loader, model, latitude, longitude, result_path = prepare_model_and_loader(
-        device=device,
-        data_directory=str(DATA_DIRECTORY),
-        result_directory=str(RESULT_DIRECTORY / "rfp_variant"),
-        model_directory=str(MODEL_DIRECTORY),
-        variable_names=VARIABLE_NAMES,
-        num_variables=NUM_VARIABLES,
-        num_static_fields=NUM_STATIC_FIELDS,
-        max_horizon=MAX_HORIZON,
-        random_subset_size=SAMPLE_SIZE,
-        random_subset_seed=777,
-    )
+    loader, model, latitude, longitude, result_path = load_model_and_test_data(config, device,)
 
     print("Materializing input batches...")
     cached_batches = list(tqdm(
-        materialise_batches(loader, device, NUM_VARIABLES, MAX_HORIZON, latitude, longitude),
-        total=SAMPLE_SIZE,
+        materialise_batches(loader, device, config.num_variables, config.max_horizon, latitude, longitude),
+        total=config.sample_size,
         desc="Loading batches"
     ))
 
     print("Loading normalization statistics...")
-    with open(DATA_DIRECTORY / "norm_factors.json", "r") as f:
+    with open(config.data_directory / "norm_factors.json", "r") as f:
         norm_stats = json.load(f)
 
-    mean_data = torch.tensor([norm_stats[k]["mean"] for k in VARIABLE_NAMES], dtype=torch.float32)
-    std_data = torch.tensor([norm_stats[k]["std"] for k in VARIABLE_NAMES], dtype=torch.float32)
+    mean_data = torch.tensor([norm_stats[k]["mean"] for k in config.variable_names], dtype=torch.float32)
+    std_data = torch.tensor([norm_stats[k]["std"] for k in config.variable_names], dtype=torch.float32)
 
-    standardized_path = DATA_DIRECTORY / "z500_t850_t2m_u10_v10_standardized.npy"
-    raw_path = DATA_DIRECTORY / "z500_t850_t2m_u10_v10_1979-2018_5.625deg.npy"
+    standardized_path = config.data_directory / "z500_t850_t2m_u10_v10_standardized.npy"
+    raw_path = config.data_directory / "z500_t850_t2m_u10_v10_1979-2018_5.625deg.npy"
 
     if standardized_path.exists():
         print("Loading precomputed standardized ERA5 tensor...")
@@ -60,7 +45,7 @@ if __name__ == "__main__":
 
         total_timesteps = 350640
         spatial_shape = (len(latitude), len(longitude))
-        shape = (total_timesteps, NUM_VARIABLES, *spatial_shape)
+        shape = (total_timesteps, config.num_variables, *spatial_shape)
 
         raw_array = np.memmap(raw_path, dtype=np.float32, mode='r', shape=shape)
         full_tensor = torch.tensor(raw_array, dtype=torch.float32)
@@ -82,12 +67,12 @@ if __name__ == "__main__":
         results = run_gibbs_abc_rfp(
             model=model,
             batches=cached_batches,
-            ensemble_size=ENSEMBLE_SIZE,
-            n_steps=N_GIBBS_STEPS,
-            n_proposals=N_PROPOSALS_PER_VARIABLE,
-            num_variables=NUM_VARIABLES,
-            variable_names=VARIABLE_NAMES,
-            max_horizon=MAX_HORIZON,
+            ensemble_size=config.ensemble_size,
+            n_steps=config.n_gibbs_steps,
+            n_proposals=config.n_proposals_per_variable,
+            num_variables=config.num_variables,
+            variable_names=config.variable_names,
+            max_horizon=config.max_horizon,
             reference_tensor=full_tensor,
         )
 
@@ -116,7 +101,7 @@ if __name__ == "__main__":
         produce_trace_and_histogram_plots(
             results_to_keep["posterior_samples"],
             result_path,
-            VARIABLE_NAMES,
+            config.variable_names,
             ["alpha_scale"]
         )
         gc.collect()
@@ -124,8 +109,8 @@ if __name__ == "__main__":
         produce_rank_histograms(
             results_to_keep["rank_histograms"],
             result_path,
-            VARIABLE_NAMES,
-            ENSEMBLE_SIZE
+            config.variable_names,
+            config.ensemble_size
         )
         gc.collect()
 
@@ -139,7 +124,7 @@ if __name__ == "__main__":
         print_posterior_summary(
             results_to_keep["posterior_mean"],
             results_to_keep["posterior_variance"],
-            VARIABLE_NAMES,
+            config.variable_names,
             ["alpha_scale"]
         )
 

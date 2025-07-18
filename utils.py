@@ -165,34 +165,3 @@ class DynamicKBatchSampler(Sampler):
             return len(self.dataset) // self.batch_size
         else:
             return (len(self.dataset) + self.batch_size - 1) // self.batch_size
-
-import multiprocessing as mp
-import platform
-import os
-
-def set_optimal_start_method(force: bool = False) -> str:
-    """
-    Choose the best available multiprocessing start-method
-    for the current platform + job type.
-
-    Returns the method actually set ("fork", "spawn", ...).
-    Safe to call multiple times; a no-op if a start method is
-    already fixed by the parent interpreter.
-    """
-    already = mp.get_start_method(allow_none=True)
-    if already is not None:
-        return already            # someone else made the call
-
-    system = platform.system()
-
-    # 1. Windows → spawn only
-    if system == "Windows":
-        mp.set_start_method("spawn", force=force)
-        return "spawn"
-
-    # 2. We’re on a Unix-like host
-    #    If user requested GPU, prefer spawn
-    wants_gpu = bool(os.environ.get("CUDA_VISIBLE_DEVICES"))
-    method = "spawn" if wants_gpu else "fork"
-    mp.set_start_method(method, force=force)
-    return method

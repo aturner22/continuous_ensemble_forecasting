@@ -1,9 +1,0 @@
-{
-    "name": "deterministic-iterative-6h",
-    "batch_size": 160,
-    "spacing": 2,
-    "t_max": 6,
-    "t_direct": 6,
-    "t_iter": 6,
-    "n_ens": 1
-}

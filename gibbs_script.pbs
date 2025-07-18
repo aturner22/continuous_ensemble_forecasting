@@ -12,8 +12,14 @@ module load Python/3.10.4-GCCcore-11.3.0
 
 cd "$PBS_O_WORKDIR"
 
-rm -f output_gpu.log error_gpu.log
-rm -f gibbs_abc_gpu.o*
+source venv/bin/activate
+
+CONFIG_PATH="config.json"
+
+RESULT_DIR=$(python3 -c "import json; import sys; from pathlib import Path; cfg=json.load(open('$CONFIG_PATH')); print(Path(cfg['result_directory']) / cfg['name'])")
+
+mkdir -p "$RESULT_DIR"
+rm -f "$RESULT_DIR/output_gpu.log" "$RESULT_DIR/error_gpu.log" "$RESULT_DIR/gibbs_abc_gpu.o*"
 
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -24,8 +30,6 @@ export TORCH_NUM_THREADS=1
 export N_WORKERS=16
 export PARALLEL_BACKEND=thread
 
-source venv/bin/activate
+exec > "$RESULT_DIR/output_gpu.log" 2> "$RESULT_DIR/error_gpu.log"
 
-exec > output_gpu.log 2> error_gpu.log
-
-python rfp_gibbs_main.py configs/predict/deterministic-iterative-6h.json
+python rfp_gibbs_main.py
