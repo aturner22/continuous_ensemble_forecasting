@@ -1,0 +1,34 @@
+Loading batches:   0%|          | 0/1024 [00:00<?, ?it/s]Loading batches: 100%|██████████| 1024/1024 [00:00<00:00, 3552495.70it/s]
+/rds/general/user/at1824/home/msc_project/rfp_gibbs_main.py:44: UserWarning: The given NumPy array is not writable, and PyTorch does not support non-writable tensors. This means writing to this tensor will result in undefined behavior. You may want to copy the array to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at /pytorch/torch/csrc/utils/tensor_numpy.cpp:203.)
+  full_tensor = torch.from_numpy(full_array)
+Gibbs Sampling Steps:   0%|          | 0/3 [00:00<?, ?it/s]Gibbs Sampling Steps:   0%|          | 0/3 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/rds/general/user/at1824/home/msc_project/rfp_gibbs_main.py", line 69, in <module>
+    results = run_gibbs_abc_rfp(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 146, in run_gibbs_abc_rfp
+    ensemble_tensor, target_tensor = generate_batched_ensemble(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 107, in generate_batched_ensemble
+    out = model(model_inputs[start:end], time_inputs[start:end]).detach()
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/diffusion_networks.py", line 417, in forward
+    D_x = self.model(x, time_labels, class_labels=class_labels).to(torch.float32)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/diffusion_networks.py", line 375, in forward
+    x = block(x, emb) if isinstance(block, UNetBlock) else block(x)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/diffusion_networks.py", line 197, in forward
+    w = AttentionOp.apply(q, k)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/autograd/function.py", line 575, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+  File "/rds/general/user/at1824/home/msc_project/diffusion_networks.py", line 131, in forward
+    w = torch.einsum('ncq,nck->nqk', q.to(torch.float32), (k / np.sqrt(k.shape[1])).to(torch.float32)).softmax(dim=2).to(q.dtype)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.41 GiB. GPU 0 has a total capacity of 44.42 GiB of which 212.12 MiB is free. Including non-PyTorch memory, this process has 44.17 GiB memory in use. Of the allocated memory 42.61 GiB is allocated by PyTorch, and 1.07 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
