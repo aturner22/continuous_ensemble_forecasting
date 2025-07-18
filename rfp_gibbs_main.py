@@ -28,22 +28,22 @@ if __name__ == "__main__":
         desc="Loading batches"
     ))
 
-    print("Loading normalization statistics...")
-    with open(config.data_directory / "norm_factors.json", "r") as f:
-        norm_stats = json.load(f)
-
-    mean_data = torch.tensor([norm_stats[k]["mean"] for k in config.variable_names], dtype=torch.float32)
-    std_data = torch.tensor([norm_stats[k]["std"] for k in config.variable_names], dtype=torch.float32)
 
     standardized_path = config.data_directory / "z500_t850_t2m_u10_v10_standardized.npy"
     raw_path = config.data_directory / "z500_t850_t2m_u10_v10_1979-2018_5.625deg.npy"
 
     if standardized_path.exists():
         print("Loading precomputed standardized ERA5 tensor...")
-        full_array = np.load(standardized_path, mmap_mode='r')
-        full_tensor = torch.from_numpy(full_array)
+        reference_mmap = np.load(standardized_path, mmap_mode='r')
+
     else:
         print("Standardized tensor not found. Processing raw ERA5 dataset...")
+        print("Loading normalization statistics for reference tensor...")
+        with open(config.data_directory / "norm_factors.json", "r") as f:
+            norm_stats = json.load(f)
+
+        mean_data = torch.tensor([norm_stats[k]["mean"] for k in config.variable_names], dtype=torch.float32)
+        std_data = torch.tensor([norm_stats[k]["std"] for k in config.variable_names], dtype=torch.float32)
 
         total_timesteps = 350640
         spatial_shape = (len(latitude), len(longitude))
@@ -56,12 +56,16 @@ if __name__ == "__main__":
 
         print("Standardizing tensor...")
         full_tensor.sub_(mean_data[:, None, None]).div_(std_data[:, None, None])
-
         print("Saving standardized tensor for future runs...")
         np.save(standardized_path, full_tensor.cpu().numpy())
+        del full_tensor
+        del mean_data
+        del std_data
+        gc.collect()
 
-    if device.type == "cuda":
-        full_tensor = full_tensor.pin_memory()
+        gc.collect()
+        reference_mmap = np.load(standardized_path, mmap_mode='r')
+
     torch.cuda.empty_cache()
 
     try:
@@ -75,7 +79,7 @@ if __name__ == "__main__":
             num_variables=config.num_variables,
             variable_names=config.variable_names,
             max_horizon=config.max_horizon,
-            reference_tensor=full_tensor,
+            reference_mmap=reference_mmap,
         )
 
         print("Saving posterior results...")
@@ -84,11 +88,7 @@ if __name__ == "__main__":
         # Proactive memory cleanup before plotting
         print("Releasing memory before plotting...")
         torch.cuda.empty_cache()
-        del full_tensor
-        del mean_data
-        del std_data
-        gc.collect()
-
+  
         results_to_keep = {
             "posterior_samples": results["posterior_samples"],
             "rank_histograms": results["rank_histograms"],
