@@ -14,11 +14,15 @@ cd "$PBS_O_WORKDIR"
 
 source venv/bin/activate
 
+CONFIG_TIMESTAMP=$(python3 -c "from datetime import datetime, timezone; print(datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+export CONFIG_TIMESTAMP
+
 CONFIG_PATH="config.json"
 
 RESULT_DIR=$(python3 -c "
+import os
 from config import Config
-cfg = Config('$CONFIG_PATH')
+cfg = Config('$CONFIG_PATH', timestamp=os.environ['CONFIG_TIMESTAMP'])
 print(cfg.result_directory)")
 
 mkdir -p "$RESULT_DIR"

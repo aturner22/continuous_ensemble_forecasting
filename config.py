@@ -6,14 +6,17 @@ from typing import Any
 from datetime import datetime, timezone
 
 class Config:
-    def __init__(self, config_path: str | Path):
+    def __init__(self, config_path: str | Path, timestamp: str | None = None):
         with open(config_path, "r") as f:
             raw = json.load(f)
 
         self.config_path = str(config_path)
 
         self.raw: dict[str, Any] = raw
-        self.name: str = raw["name"]+"_"+datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        if timestamp is None:
+            timestamp = datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        self.name: str = raw["name"] + "_" + timestamp
         self.sample_size: int = raw["sample_size"]
         self.ensemble_size: int = raw["ensemble_size"]
         self.n_gibbs_steps: int = raw["n_gibbs_steps"]

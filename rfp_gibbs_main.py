@@ -5,6 +5,7 @@ if __name__ == "__main__":
     import torch
     from tqdm import tqdm
     from config import Config
+    import os
 
     from core.io_utils import load_model_and_test_data, save_posterior_statistics, materialise_batches, print_computing_configuration
     from core.plotting import produce_trace_and_histogram_plots, produce_rank_histograms, plot_crps_trace
@@ -15,7 +16,8 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print_computing_configuration()
     print(f"Using device: {device}")
-    config = Config("config.json")
+    timestamp = os.environ.get("CONFIG_TIMESTAMP")
+    config = Config("config.json", timestamp=timestamp)
     print("Preparing model and data loader...")
     loader, model, latitude, longitude, result_path = load_model_and_test_data(config, device,)
 
