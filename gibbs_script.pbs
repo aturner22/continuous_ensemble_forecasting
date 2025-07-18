@@ -16,7 +16,10 @@ source venv/bin/activate
 
 CONFIG_PATH="config.json"
 
-RESULT_DIR=$(python3 -c "import json; import sys; from pathlib import Path; cfg=json.load(open('$CONFIG_PATH')); print(Path(cfg['result_directory']) / cfg['name'])")
+RESULT_DIR=$(python3 -c "
+from core.config import Config
+cfg = Config('$CONFIG_PATH')
+print(cfg.result_directory)")
 
 mkdir -p "$RESULT_DIR"
 rm -f "$RESULT_DIR/output_gpu.log" "$RESULT_DIR/error_gpu.log" "$RESULT_DIR/gibbs_abc_gpu.o*"
@@ -30,6 +33,12 @@ export TORCH_NUM_THREADS=1
 export N_WORKERS=16
 export PARALLEL_BACKEND=thread
 
-exec > "$RESULT_DIR/output_gpu.log" 2> "$RESULT_DIR/error_gpu.log"
+python rfp_gibbs_main.py > "$RESULT_DIR/output_gpu.log" 2> "$RESULT_DIR/error_gpu.log"
 
-python rfp_gibbs_main.py
+JOB_ID="${PBS_JOBID%%.*}"
+DEFAULT_PBS_OUTPUT_FILE="$PBS_O_WORKDIR/gibbs_abc_gpu.o${JOB_ID}"
+TARGET_PBS_OUTPUT_FILE="$RESULT_DIR/gibbs_abc_gpu.o${JOB_ID}"
+
+if [ -f "$DEFAULT_PBS_OUTPUT_FILE" ]; then
+    mv "$DEFAULT_PBS_OUTPUT_FILE" "$TARGET_PBS_OUTPUT_FILE"
+fi
