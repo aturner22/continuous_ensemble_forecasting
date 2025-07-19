@@ -1,0 +1,26 @@
+{
+  "name": "rfp_gibbs_abc_scale_up",
+  "description": "scaling up hyperparams to see effect on runtime and queue time. Walltime increased to 30",
+
+  "sample_size": 1024,
+  "ensemble_size": 100,
+  "n_gibbs_steps": 3,
+  "n_proposals_per_variable": 10,
+  "proposal_scale": 0.05,
+
+  "n_universe_samples": 350640,
+
+  "spacing": 2,
+  "t_max": 6,
+  "t_direct": 6,
+  "t_iter": 6,
+  "n_ens": 1,
+
+  "variable_names": ["z500", "t850", "t2m", "u10", "v10"],
+  "num_static_fields": 2,
+  "max_horizon": 240,
+
+  "data_directory": "./data",
+  "model_directory": "./models",
+  "result_directory": "./results"
+}
