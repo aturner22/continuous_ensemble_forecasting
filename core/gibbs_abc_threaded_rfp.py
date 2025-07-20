@@ -82,6 +82,8 @@ def generate_batched_ensemble_from_mmap(
         spatial_height=H,
         spatial_width=W,
         num_outputs=current_fields.shape[1],
+        model_overhead=1.5,
+        safety_divisor=16.0
     )
 
     outputs = []

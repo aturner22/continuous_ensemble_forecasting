@@ -87,7 +87,9 @@ if __name__ == "__main__":
         num_variables=C,
         spatial_height=H,
         spatial_width=W,
-        num_outputs=V
+        num_outputs=V,
+        model_overhead=1.5,
+        safety_divisor=16.0
     )
     print(f"Safe chunk size determined: {chunk_size} samples per batch")
 

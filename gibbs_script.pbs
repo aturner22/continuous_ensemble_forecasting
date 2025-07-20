@@ -28,6 +28,8 @@ print(cfg.result_directory)")
 mkdir -p "$RESULT_DIR"
 rm -f "$RESULT_DIR/output_gpu.log" "$RESULT_DIR/error_gpu.log" "$RESULT_DIR/gibbs_abc_gpu.o*"
 
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256,garbage_collection_threshold:0.8
+
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
