@@ -20,8 +20,8 @@ def compute_safe_batch_size(
     spatial_width: int,
     num_outputs: int,
     dtype_bytes: int = 4,
-    model_overhead: float = 3.0,
-    safety_divisor: float = 32.0,
+    model_overhead: float = 2,
+    safety_divisor: float = 1.5,
     available_bytes: int | None = None,
 ) -> int:
     if available_bytes is None:
@@ -32,7 +32,7 @@ def compute_safe_batch_size(
             available_bytes = total - max(reserved, allocated)
         else:
             available_bytes = psutil.virtual_memory().available
-
+    print(f"Available memory bytes: {available_bytes}")
     spatial_elements = spatial_height * spatial_width
     tensor_bytes = (
         (num_variables + 2) * spatial_elements +
