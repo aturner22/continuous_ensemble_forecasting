@@ -1,29 +1,39 @@
 import torch
 
+def validate_tensor_shapes(ensemble: torch.Tensor, target: torch.Tensor):
+    if ensemble.dim() < 2:
+        raise ValueError("Ensemble tensor must be at least 2-dimensional [E, ...]")
+    if ensemble.shape[1:] != target.shape:
+        raise ValueError(f"Incompatible shapes: {ensemble.shape[1:]} vs {target.shape}")
+
 def print_posterior_summary(posterior_mean, posterior_variance, variable_names, parameter_labels):
     print("\nPosterior parameter moments:")
     print("---------------------------")
     for variable_index, variable in enumerate(variable_names):
         print(f"{variable}:")
         for parameter_index, label in enumerate(parameter_labels):
-            μ = posterior_mean[variable_index, parameter_index]
-            sigma2 = posterior_variance[variable_index, parameter_index]
-            print(f"  {label}: μ = {μ:+.4f}, σ² = {sigma2:.4e}")
+            mu = posterior_mean[variable_index, parameter_index]
+            sigma_square = posterior_variance[variable_index, parameter_index]
+            print(f"  {label}: mu = {mu:+.4f}, sigma_square = {sigma_square:.4e}")
 
+def continuous_ranked_probability_score(ensemble: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    validate_tensor_shapes(ensemble, target)
+    absolute_error = torch.abs(ensemble - target.unsqueeze(0)).mean(dim=0)
+    pairwise = torch.abs(ensemble.unsqueeze(0) - ensemble.unsqueeze(1)).mean(dim=(0, 1))
+    return absolute_error - 0.5 * pairwise
 
-def continuous_ranked_probability_score(ensemble_tensor: torch.Tensor, target_field: torch.Tensor) -> torch.Tensor:
-    absolute_error_term = torch.mean(torch.abs(ensemble_tensor - target_field.unsqueeze(0)))
-    pairwise_differences = torch.abs(ensemble_tensor.unsqueeze(0) - ensemble_tensor.unsqueeze(1))
-    second_moment_term = 0.5 * torch.mean(pairwise_differences)
-    return absolute_error_term - second_moment_term
+def compute_rank_histogram(ensemble: torch.Tensor, target: torch.Tensor, ensemble_size: int) -> torch.Tensor:
+    validate_tensor_shapes(ensemble, target)
+    with torch.no_grad():
+        rank_counts = (ensemble < target.unsqueeze(0)).sum(dim=0)
+    histogram = rank_counts.view(-1).float().cpu().numpy() / ensemble_size
+    return histogram
 
-def compute_rank_histogram(predictions: torch.Tensor, targets: torch.Tensor, ensemble_size: int) -> torch.Tensor:
-    ranks = (predictions < targets.unsqueeze(0)).sum(dim=0).flatten().cpu().numpy()
-    return ranks / ensemble_size
+def compute_mean_absolute_error(ensemble: torch.Tensor, target: torch.Tensor) -> float:
+    validate_tensor_shapes(ensemble, target)
+    return torch.abs(ensemble.mean(dim=0) - target).mean().item()
 
-def compute_mean_absolute_error(predictions: torch.Tensor, targets: torch.Tensor) -> float:
-    mean_prediction = predictions.mean(dim=0)
-    return torch.mean(torch.abs(mean_prediction - targets)).item()
-
-def compute_ensemble_spread(predictions: torch.Tensor) -> float:
-    return torch.std(predictions, dim=0).mean().item()
+def compute_ensemble_spread(ensemble: torch.Tensor) -> float:
+    if ensemble.dim() < 2:
+        raise ValueError("Ensemble tensor must be at least 2-dimensional")
+    return ensemble.std(dim=0).mean().item()

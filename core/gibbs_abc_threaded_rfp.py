@@ -13,56 +13,34 @@ from core.evaluation import (
 
 PROPOSAL_SCALE = 0.05
 
-def estimate_safe_chunk_size(
-    num_input_channels: int,
-    num_output_channels: int,
-    height: int,
-    width: int,
-    available_memory_bytes: int = None,
-    dtype_size_bytes: int = 4,
-    model_overhead_factor: float = 3.0,
-    safety_factor: float = 32.0,
-) -> int:
-    if available_memory_bytes is None:
-        if torch.cuda.is_available():
-            reserved = torch.cuda.memory_reserved(0)
-            allocated = torch.cuda.memory_allocated(0)
-            total = torch.cuda.get_device_properties(0).total_memory
-            available_memory_bytes = total - max(reserved, allocated)
-        else:
-            virtual_mem = psutil.virtual_memory()
-            available_memory_bytes = virtual_mem.available
-    spatial_size = height * width
-    bytes_per_sample = (
-        (num_input_channels + num_output_channels)
-        * spatial_size * dtype_size_bytes * model_overhead_factor
-    )
-    return max(8, int(available_memory_bytes // (bytes_per_sample * safety_factor)))
-
-def estimate_safe_outer_batch_size(
-    num_input_channels: int,
-    num_output_channels: int,
+def compute_safe_batch_size(
+    ensemble_size: int,
+    num_variables: int,
     spatial_height: int,
     spatial_width: int,
-    ensemble_size: int,
+    num_outputs: int,
     dtype_bytes: int = 4,
     model_overhead: float = 3.0,
     safety_divisor: float = 32.0,
-    available_memory_bytes: int | None = None,
+    available_bytes: int | None = None,
 ) -> int:
-    if available_memory_bytes is None:
+    if available_bytes is None:
         if torch.cuda.is_available():
             reserved = torch.cuda.memory_reserved(0)
             allocated = torch.cuda.memory_allocated(0)
             total = torch.cuda.get_device_properties(0).total_memory
-            available_memory_bytes = total - max(reserved, allocated)
+            available_bytes = total - max(reserved, allocated)
         else:
-            available_memory_bytes = psutil.virtual_memory().available
+            available_bytes = psutil.virtual_memory().available
 
-    total_elements_per_sample = (num_input_channels + num_output_channels) * spatial_height * spatial_width
-    total_bytes_per_sample = ensemble_size * total_elements_per_sample * dtype_bytes * model_overhead
-    max_batch_size = int(available_memory_bytes // (total_bytes_per_sample * safety_divisor))
-    return max(8, max_batch_size)
+    spatial_elements = spatial_height * spatial_width
+    tensor_bytes = (
+        (num_variables + 2) * spatial_elements +
+        num_outputs * spatial_elements +
+        num_variables * ensemble_size * spatial_elements * 3
+    ) * dtype_bytes * model_overhead
+
+    return max(1, int(available_bytes // (tensor_bytes * safety_divisor)))
 
 def generate_batched_ensemble_from_mmap(
     *,
@@ -98,13 +76,12 @@ def generate_batched_ensemble_from_mmap(
     full_input_tensor = torch.cat([variable_fields, static_fields], dim=2).reshape(N * ensemble_size, C, H, W)
     full_time_tensor = time_normalised.unsqueeze(1).expand(-1, ensemble_size).reshape(-1, 1)
 
-    # Safe outer batch size
-    safe_outer_batch_size = estimate_safe_outer_batch_size(
-        num_input_channels=C,
-        num_output_channels=current_fields.shape[1],
+    safe_outer_batch_size = compute_safe_batch_size(
+        ensemble_size=ensemble_size,
+        num_variables=C,
         spatial_height=H,
         spatial_width=W,
-        ensemble_size=ensemble_size,
+        num_outputs=current_fields.shape[1],
     )
 
     outputs = []
@@ -119,8 +96,6 @@ def generate_batched_ensemble_from_mmap(
 
     output_tensor = torch.cat(outputs, dim=0).view(N, ensemble_size, -1, H, W).permute(1, 0, 2, 3, 4).contiguous()
     return output_tensor, current_fields[:, variable_index]
-
-
 
 def run_gibbs_abc_rfp(
     *,
@@ -150,6 +125,15 @@ def run_gibbs_abc_rfp(
     C = full_previous.shape[1]
     V = full_current.shape[1]
     H, W = full_previous.shape[-2:]
+    N = full_previous.shape[0]
+
+    chunk_size = compute_safe_batch_size(
+        ensemble_size=ensemble_size,
+        num_variables=C,
+        spatial_height=H,
+        spatial_width=W,
+        num_outputs=V,
+    )
 
     current_parameter_matrix = np.random.uniform(low=1.0, high=5.0, size=(num_variables, 1))
 
@@ -183,37 +167,55 @@ def run_gibbs_abc_rfp(
                 alpha = proposal_matrix[proposal_index][0]
                 print(f"    Proposal {proposal_index + 1}/{n_proposals} (alpha = {alpha:.4f})")
 
-                ensemble_tensor, target_tensor = generate_batched_ensemble_from_mmap(
-                    model=model,
-                    previous_fields=full_previous,
-                    current_fields=full_current,
-                    time_normalised=full_time,
-                    reference_mmap=reference_mmap,
-                    variable_index=variable_index,
-                    alpha=alpha,
-                    ensemble_size=ensemble_size,
-                    device=device,
-                )
+                crps_values = []
+                ranks_agg = []
+                members_list = []
+                targets_list = []
 
-                crps = continuous_ranked_probability_score(
-                    ensemble_tensor[:, :, variable_index], target_tensor
-                )
-                ranks = compute_rank_histogram(
-                    ensemble_tensor[:, :, variable_index], target_tensor, ensemble_size
-                )
+                for batch_start in range(0, N, chunk_size):
+                    batch_end = min(batch_start + chunk_size, N)
 
-                crps_mean = crps.mean().item()
+                    ensemble_tensor, target_tensor = generate_batched_ensemble_from_mmap(
+                        model=model,
+                        previous_fields=full_previous[batch_start:batch_end],
+                        current_fields=full_current[batch_start:batch_end],
+                        time_normalised=full_time[batch_start:batch_end],
+                        reference_mmap=reference_mmap,
+                        variable_index=variable_index,
+                        alpha=alpha,
+                        ensemble_size=ensemble_size,
+                        device=device,
+                    )
+
+                    crps = continuous_ranked_probability_score(
+                        ensemble_tensor[:, :, variable_index], target_tensor
+                    )
+                    ranks = compute_rank_histogram(
+                        ensemble_tensor[:, :, variable_index], target_tensor, ensemble_size
+                    )
+
+                    crps_values.append(crps.detach().cpu())
+                    ranks_agg.extend(ranks)
+
+                    if log_diagnostics:
+                        members_list.append(ensemble_tensor[:, :, variable_index].detach().cpu())
+                        targets_list.append(target_tensor.detach().cpu())
+
+                    del ensemble_tensor, target_tensor
+                    gc.collect()
+
+                crps_mean = torch.cat(crps_values, dim=0).mean().item()
                 print(f"      Mean CRPS: {crps_mean:.6f}")
 
                 if crps_mean < best_crps_value:
                     best_crps_value = crps_mean
                     best_parameter_vector = proposal_matrix[proposal_index]
-                    best_ranks = ranks
+                    best_ranks = ranks_agg
                     if log_diagnostics:
-                        best_members = ensemble_tensor[:, :, variable_index].clone()
-                        best_targets = target_tensor.clone()
+                        best_members = torch.cat(members_list, dim=1)
+                        best_targets = torch.cat(targets_list, dim=0)
 
-                del ensemble_tensor, target_tensor
+                del crps_values, members_list, targets_list
                 gc.collect()
 
             posterior_samples[step_index, variable_index] = best_parameter_vector
