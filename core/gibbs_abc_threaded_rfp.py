@@ -21,7 +21,7 @@ def compute_safe_batch_size(
     num_outputs: int,
     dtype_bytes: int = 4,
     model_overhead: float = 2,
-    safety_divisor: float = 1.5,
+    safety_divisor: float = 5,
     available_bytes: int | None = None,
 ) -> int:
     if available_bytes is None:
