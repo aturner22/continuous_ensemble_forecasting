@@ -1,6 +1,5 @@
 .env
 *.pdf
-*.png
 *.gif
 *.csv
 __pycache__

@@ -82,7 +82,7 @@ if __name__ == "__main__":
     H, W = example_input.shape[-2:]
 
     print("Estimating safe chunk size...")
-    chunk_size = compute_safe_batch_size(
+    chunk_size = min(256,compute_safe_batch_size(
         ensemble_size=config.ensemble_size,
         num_variables=C,
         spatial_height=H,
@@ -90,7 +90,7 @@ if __name__ == "__main__":
         num_outputs=V,
         model_overhead=1.5,
         safety_divisor=16.0
-    )
+    ))
     print(f"Safe chunk size determined: {chunk_size} samples per batch")
 
     try:
@@ -105,13 +105,18 @@ if __name__ == "__main__":
             variable_names=config.variable_names,
             max_horizon=config.max_horizon,
             reference_mmap=reference_mmap,
+            result_directory=result_path,
             log_diagnostics=True
         )
+
 
         print("Saving posterior results...")
         save_posterior_statistics(results, result_path)
 
         print("Releasing memory before plotting...")
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
         torch.cuda.empty_cache()
         gc.collect()
 
@@ -158,4 +163,5 @@ if __name__ == "__main__":
     finally:
         gc.collect()
         if torch.cuda.is_available():
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
