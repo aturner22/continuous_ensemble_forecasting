@@ -1,0 +1,36 @@
+Initializing device...
+
+--- Computing Configuration ---
+Platform: Linux 4.18.0-477.27.1.el8_8.x86_64
+Python version: 3.10.4
+CUDA available: True
+CUDA device count: 1
+CUDA device name: NVIDIA L40S
+CUDA device capability: (8, 9)
+CUDA memory allocated: 0.00 GB
+CUDA memory reserved: 0.00 GB
+torch version: 2.7.1+cu126
+Number of CPUs: 64
+Physical CPU cores: 64
+OMP_NUM_THREADS: 1
+MKL_NUM_THREADS: 1
+OPENBLAS_NUM_THREADS: 1
+TORCH_NUM_THREADS: 1
+N_WORKERS: 16
+PARALLEL_BACKEND: thread
+--------------------------------
+
+Using device: cuda
+Preparing model and data loader...
+Number of samples: 350640
+Using every 2'th sample for evaluation...
+Using random subset of 800 samples (seed=777)
+Materializing input batches...
+Preparing standardized reference tensor...
+Loading precomputed standardized ERA5 tensor...
+Estimating safe chunk size...
+Available memory bytes: 47566028800
+Safe chunk size determined: 83 samples per batch
+Commencing ABC-Gibbs inference with RFP perturbations...
+Available memory bytes: 47452782592
+[Device Warm-up]...

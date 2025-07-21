@@ -1,0 +1,10 @@
+/var/spool/pbs/mom_priv/jobs/737640.pbs-7.SC: line 42: 1000002 Segmentation fault      (core dumped) python rfp_gibbs_main.py > "$RESULT_DIR/output_gpu.log" 2> "$RESULT_DIR/error_gpu.log"
+
+====================================
+CPU Time used: 04:04:13
+CPU Percent: 99%
+Memory usage: 20373792kb
+Approx Power usage: 0.048799999999999996
+Walltime usage: 04:20:53
+
+====================================

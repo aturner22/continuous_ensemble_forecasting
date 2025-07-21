@@ -1,0 +1,2 @@
+Loading batches:   0%|          | 0/800 [00:00<?, ?it/s]Loading batches: 100%|██████████| 800/800 [00:00<00:00, 3502550.31it/s]
+Gibbs Sampling Steps:   0%|          | 0/80 [00:00<?, ?it/s]Gibbs Sampling Steps:   1%|▏         | 1/80 [30:59<40:47:53, 1859.16s/it]
