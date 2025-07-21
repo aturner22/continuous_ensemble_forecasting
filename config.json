@@ -2,10 +2,10 @@
   "name": "rfp_gibbs_abc_higher_hyperparams",
   "description": "scaling up hyperparams",
 
-  "sample_size": 800,
-  "ensemble_size": 80,
+  "sample_size": 750,
+  "ensemble_size": 75,
   "n_gibbs_steps": 80,
-  "n_proposals_per_variable": 8,
+  "n_proposals_per_variable": 7,
   "proposal_scale": 0.05,
 
   "n_universe_samples": 350640,
