@@ -1,10 +1,10 @@
 {
-  "name": "new_rfp_abc_with_energy_scaling",
-  "description": "overhaul and refactored version",
+  "name": "rfp_gibbs_abc_higher_hyperparams",
+  "description": "scaling up hyperparams",
 
-  "sample_size": 50,
-  "ensemble_size": 25,
-  "n_gibbs_steps": 50,
+  "sample_size": 10,
+  "ensemble_size": 10,
+  "n_gibbs_steps": 10,
   "n_proposals_per_variable": 5,
   "proposal_scale": 0.05,
 

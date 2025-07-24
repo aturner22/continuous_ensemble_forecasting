@@ -53,8 +53,7 @@ def load_or_generate_standardized_reference(config, latitude, longitude) -> np.m
     gc.collect()
     return np.load(standardized_path, mmap_mode='r')
 
-
-if __name__ == "__main__":
+def main():
     print("Initializing device...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print_computing_configuration()
@@ -64,7 +63,7 @@ if __name__ == "__main__":
     config = Config("config.json", timestamp=timestamp)
 
     print("Preparing model and data loader...")
-    loader, model, latitude, longitude, result_path = load_model_and_test_data(config, device)
+    loader, model, latitude, longitude, result_path = load_model_and_test_data(config, device, config.SEED)
 
     print("Materializing input batches...")
     cached_batches = list(tqdm(
@@ -165,3 +164,6 @@ if __name__ == "__main__":
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
+
+if __name__ == "__main__":
+    main()

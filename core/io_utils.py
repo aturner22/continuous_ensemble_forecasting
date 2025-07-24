@@ -19,7 +19,7 @@ import datetime
 def load_model_and_test_data(
     config: Config,
     device: torch.device,
-    random_subset_seed: int = 777,
+    random_subset_seed: int,
 ) -> tuple[DataLoader, torch.nn.Module, np.ndarray, np.ndarray, Path]:
 
     result_path = config.result_directory

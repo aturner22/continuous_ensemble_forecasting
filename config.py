@@ -32,6 +32,7 @@ class Config:
         self.t_direct: int = raw["t_direct"]
         self.t_iter: int = raw["t_iter"]
         self.n_ens: int = raw["n_ens"]
+        self.SEED: int = raw["seed"]
 
         # paths
         self.data_directory: Path = Path(raw["data_directory"])
