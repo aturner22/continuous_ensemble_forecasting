@@ -1,0 +1,36 @@
+Loading batches:   0%|          | 0/500 [00:00<?, ?it/s]Loading batches: 100%|██████████| 500/500 [00:00<00:00, 3102295.86it/s]
+Gibbs:   0%|          | 0/50 [00:00<?, ?it/s]Gibbs:   0%|          | 0/50 [00:02<?, ?it/s]
+Traceback (most recent call last):
+  File "/rds/general/user/at1824/home/msc_project/rfp_gibbs_verbose.py", line 34, in <module>
+    plt.ion(); inner_main(); plt.ioff(); plt.show()
+  File "/rds/general/user/at1824/home/msc_project/rfp_gibbs_main.py", line 97, in main
+    results = run_gibbs_abc_rfp(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 243, in run_gibbs_abc_rfp
+    ens_prop = batched_forward_proposals(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 141, in batched_forward_proposals
+    y = model(full_input[start:end], full_time[start:end])
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/diffusion_networks.py", line 417, in forward
+    D_x = self.model(x, time_labels, class_labels=class_labels).to(torch.float32)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/diffusion_networks.py", line 375, in forward
+    x = block(x, emb) if isinstance(block, UNetBlock) else block(x)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/rds/general/user/at1824/home/msc_project/diffusion_networks.py", line 197, in forward
+    w = AttentionOp.apply(q, k)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/autograd/function.py", line 575, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+  File "/rds/general/user/at1824/home/msc_project/diffusion_networks.py", line 131, in forward
+    w = torch.einsum('ncq,nck->nqk', q.to(torch.float32), (k / np.sqrt(k.shape[1])).to(torch.float32)).softmax(dim=2).to(q.dtype)
+  File "/rds/general/user/at1824/home/msc_project/venv/lib/python3.10/site-packages/torch/functional.py", line 422, in einsum
+    return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 5.03 GiB. GPU 0 has a total capacity of 44.42 GiB of which 644.12 MiB is free. Including non-PyTorch memory, this process has 43.78 GiB memory in use. Of the allocated memory 40.83 GiB is allocated by PyTorch, and 2.46 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
