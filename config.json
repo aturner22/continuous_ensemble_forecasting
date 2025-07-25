@@ -1,11 +1,11 @@
 {
-  "name": "new_rfp_abc_with_energy_scaling",
-  "description": "overhaul and refactored version",
+  "name": "larger_params_energy_scaled_rfp",
+  "description": "Scaling up new hyperparameters. If this runs with no memory issues I will set to run for more gibbs steps.",
 
-  "sample_size": 50,
-  "ensemble_size": 25,
+  "sample_size": 500,
+  "ensemble_size": 50,
   "n_gibbs_steps": 50,
-  "n_proposals_per_variable": 5,
+  "n_proposals_per_variable": 8,
   "proposal_scale": 0.05,
 
   "n_universe_samples": 350640,
