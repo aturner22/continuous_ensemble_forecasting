@@ -28,7 +28,7 @@ print(cfg.result_directory)")
 mkdir -p "$RESULT_DIR"
 rm -f "$RESULT_DIR/output_gpu.log" "$RESULT_DIR/error_gpu.log" "$RESULT_DIR/gibbs_abc_gpu.o*"
 
-export PYTORCH_CUDA_ALLOC_CONF=backend:cuda_malloc_async
+export PYTORCH_CUDA_ALLOC_CONF=backend:native
 
 
 export MKL_NUM_THREADS=1
