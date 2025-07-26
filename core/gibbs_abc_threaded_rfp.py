@@ -185,17 +185,56 @@ def generate_joint_rfp(
     return perturb  # [P,B,K,V,H,W]
 
 # --------------------------------------------------------------------------- #
+def memory_efficient_crps(ensemble: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """
+    Memory-efficient CRPS computation avoiding quadratic ensemble memory usage.
+    Args:
+        ensemble: [K, ...] where K is ensemble size
+        target: [...] target values
+    Returns:
+        CRPS values of same shape as target
+    """
+    K = ensemble.shape[0]
+    target_expanded = target.unsqueeze(0)  # [1, ...]
+    
+    # Compute |ensemble - target| term efficiently
+    absolute_error = torch.abs(ensemble - target_expanded).mean(dim=0)
+    
+    # Compute pairwise term in chunks to avoid quadratic memory
+    ensemble_flat = ensemble.view(K, -1)  # [K, spatial_total]
+    pairwise_sum = torch.zeros(ensemble_flat.shape[1], device=ensemble.device, dtype=ensemble.dtype)
+    
+    chunk_size = min(K, 32)  # Process ensemble members in chunks
+    for i in range(0, K, chunk_size):
+        end_i = min(i + chunk_size, K)
+        for j in range(0, K, chunk_size):
+            end_j = min(j + chunk_size, K)
+            
+            # Compute pairwise distances for this chunk
+            chunk_i = ensemble_flat[i:end_i]  # [chunk_i_size, spatial]
+            chunk_j = ensemble_flat[j:end_j]  # [chunk_j_size, spatial]
+            
+            pairwise_chunk = torch.abs(
+                chunk_i.unsqueeze(1) - chunk_j.unsqueeze(0)
+            ).mean(dim=(0, 1))  # [spatial]
+            
+            pairwise_sum += pairwise_chunk
+    
+    pairwise_mean = pairwise_sum / (K * K)
+    pairwise_mean = pairwise_mean.view(target.shape)
+    
+    return absolute_error - 0.5 * pairwise_mean
+
 def compute_crps_for_proposal(
     ensemble_output: torch.Tensor,  # [K,N,V,H,W]
     target: torch.Tensor,          # [N,V,H,W]
     num_variables: int,
 ) -> float:
-    """Compute joint CRPS score for a single proposal to avoid memory accumulation."""
-    from core.evaluation import continuous_ranked_probability_score
+    """Compute joint CRPS score for a single proposal with memory-efficient computation."""
     
     crps_vars = []
     for j in range(num_variables):
-        crps_pj = continuous_ranked_probability_score(
+        crps_pj = memory_efficient_crps(
             ensemble_output[:, :, j], target[:, j]
         ).mean()
         crps_vars.append(crps_pj)
