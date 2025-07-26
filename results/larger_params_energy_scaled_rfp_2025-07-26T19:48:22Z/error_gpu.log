@@ -1,0 +1,12 @@
+Loading batches:   0%|          | 0/500 [00:00<?, ?it/s]Loading batches: 100%|██████████| 500/500 [00:00<00:00, 3093144.54it/s]
+Gibbs:   0%|          | 0/50 [00:00<?, ?it/s]Gibbs:   0%|          | 0/50 [02:18<?, ?it/s]
+Traceback (most recent call last):
+  File "/rds/general/user/at1824/home/msc_project/rfp_gibbs_main.py", line 159, in <module>
+    main()
+  File "/rds/general/user/at1824/home/msc_project/rfp_gibbs_main.py", line 87, in main
+    results = run_gibbs_abc_rfp(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 408, in run_gibbs_abc_rfp
+    ens_prop = batched_forward_proposals(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 302, in batched_forward_proposals
+    return torch.stack(outputs, dim=0)  # [P,K,N,V,H,W]
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 7.63 GiB. GPU 0 has a total capacity of 44.42 GiB of which 6.55 GiB is free. Including non-PyTorch memory, this process has 37.86 GiB memory in use. Of the allocated memory 34.32 GiB is allocated by PyTorch, and 3.05 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
