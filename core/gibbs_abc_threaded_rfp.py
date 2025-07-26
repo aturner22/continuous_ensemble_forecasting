@@ -20,6 +20,102 @@ EPS_ENERGY          = 1e-12
 CHECKPOINT_FILE     = "gibbs_checkpoint_step.npz"
 
 # --------------------------------------------------------------------------- #
+class DynamicBatchManager:
+    """Intelligent dynamic batch size management based on actual GPU memory usage."""
+    
+    def __init__(self, device, initial_batch_size: int = 64, min_batch_size: int = 1):
+        self.device = device
+        self.current_batch_size = initial_batch_size
+        self.min_batch_size = min_batch_size
+        self.max_successful_batch_size = initial_batch_size
+        self.memory_history = []
+        
+    def get_memory_stats(self):
+        """Get current GPU memory statistics."""
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated(self.device)
+            reserved = torch.cuda.memory_reserved(self.device)
+            total = torch.cuda.get_device_properties(self.device).total_memory
+            free = total - allocated
+            return allocated, reserved, total, free
+        return 0, 0, psutil.virtual_memory().total, psutil.virtual_memory().available
+    
+    def try_batch_size(self, batch_size: int, test_fn):
+        """Test if a batch size works by running a test function."""
+        try:
+            allocated_before, _, _, _ = self.get_memory_stats()
+            result = test_fn(batch_size)
+            allocated_after, _, _, _ = self.get_memory_stats()
+            
+            # Record successful batch size and memory usage
+            memory_used = allocated_after - allocated_before
+            self.memory_history.append((batch_size, memory_used))
+            self.max_successful_batch_size = max(self.max_successful_batch_size, batch_size)
+            
+            return result, True
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                torch.cuda.empty_cache()
+                return None, False
+            else:
+                raise e
+    
+    def find_optimal_batch_size(self, test_fn, target_batch_size: int = None):
+        """Binary search to find the largest batch size that fits in memory."""
+        if target_batch_size is None:
+            target_batch_size = self.current_batch_size
+            
+        # Start with conservative estimate
+        low = self.min_batch_size
+        high = min(target_batch_size * 2, 1024)  # reasonable upper bound
+        
+        best_batch_size = self.min_batch_size
+        
+        print(f"[DynamicBatch] Finding optimal batch size between {low} and {high}")
+        
+        while low <= high:
+            mid = (low + high) // 2
+            print(f"[DynamicBatch] Testing batch size: {mid}")
+            
+            _, success = self.try_batch_size(mid, test_fn)
+            
+            if success:
+                best_batch_size = mid
+                low = mid + 1  # Try larger
+                print(f"[DynamicBatch] ✓ Batch size {mid} succeeded")
+            else:
+                high = mid - 1  # Try smaller
+                print(f"[DynamicBatch] ✗ Batch size {mid} failed (OOM)")
+        
+        self.current_batch_size = best_batch_size
+        print(f"[DynamicBatch] Optimal batch size found: {best_batch_size}")
+        return best_batch_size
+    
+    def predict_safe_batch_size(self, target_samples: int):
+        """Predict safe batch size based on memory history and target load."""
+        if not self.memory_history:
+            return self.current_batch_size
+            
+        # Get average memory per sample from history
+        recent_history = self.memory_history[-5:]  # Use recent measurements
+        if recent_history:
+            avg_memory_per_sample = sum(mem / batch for batch, mem in recent_history) / len(recent_history)
+            _, _, total_memory, free_memory = self.get_memory_stats()
+            
+            # Reserve 20% of total memory for safety
+            usable_memory = min(free_memory, total_memory * 0.8)
+            predicted_batch_size = int(usable_memory / (avg_memory_per_sample * target_samples))
+            
+            # Clamp to reasonable bounds
+            predicted_batch_size = max(self.min_batch_size, min(predicted_batch_size, self.max_successful_batch_size))
+            
+            print(f"[DynamicBatch] Predicted safe batch size: {predicted_batch_size} "
+                  f"(free: {free_memory/1e9:.1f}GB, avg per sample: {avg_memory_per_sample/1e6:.1f}MB)")
+            
+            return predicted_batch_size
+        
+        return self.current_batch_size
+
 def compute_safe_batch_size(
     ensemble_size: int,
     num_variables: int,
@@ -31,7 +127,7 @@ def compute_safe_batch_size(
     safety_divisor: float = 10.0,
     available_bytes: int | None = None,
 ) -> int:
-    """Heuristic outer batch size for forward passes."""
+    """Conservative initial batch size estimate - will be refined by DynamicBatchManager."""
     if available_bytes is None:
         if torch.cuda.is_available():
             reserved  = torch.cuda.memory_reserved(0)
@@ -47,7 +143,10 @@ def compute_safe_batch_size(
         + num_outputs * spatial
         + num_variables * ensemble_size * spatial * 3
     ) * dtype_bytes * model_overhead
-    return max(1, int(available_bytes // (tensor_bytes * safety_divisor)))
+    
+    # Start conservative and let DynamicBatchManager optimize
+    initial_estimate = max(1, int(available_bytes // (tensor_bytes * safety_divisor * 4)))
+    return min(initial_estimate, 16)  # Very conservative starting point
 
 # --------------------------------------------------------------------------- #
 def generate_joint_rfp(
@@ -95,11 +194,11 @@ def batched_forward_proposals(
     ensemble_size: int,
     device: torch.device,
     buffers: dict,
-    outer_bs: int,
+    batch_manager: DynamicBatchManager,
     generator: torch.Generator,
 ) -> torch.Tensor:
     """
-    Evaluate *all* proposals in alpha_matrix jointly.
+    Evaluate *all* proposals in alpha_matrix jointly with dynamic memory management.
     Returns ensemble forecasts of shape [P,K,N,V,H,W].
     """
     N, C, H, W = previous_fields.shape
@@ -122,6 +221,36 @@ def batched_forward_proposals(
     past_base = past_slice.unsqueeze(1).expand(-1, ensemble_size, -1, -1, -1)
     stat_base = static_slice.unsqueeze(1).expand(-1, ensemble_size, -1, -1, -1)
 
+    def test_batch_size(test_batch_size):
+        """Test function for dynamic batch size detection."""
+        # Test with a small subset first
+        test_n = min(N, 2)  # Use only 2 samples for testing
+        
+        test_input = torch.cat([
+            curr_base[:test_n], 
+            past_base[:test_n], 
+            stat_base[:test_n]
+        ], dim=2)
+        test_input = test_input.view(test_n * ensemble_size, C, H, W)
+        test_time = time_normalised[:test_n].view(-1, 1).expand(-1, ensemble_size).reshape(-1, 1)
+        
+        # Test with the proposed batch size
+        step = test_batch_size * ensemble_size
+        with torch.no_grad():
+            test_end = min(step, test_n * ensemble_size)
+            _ = model(test_input[:test_end], test_time[:test_end])
+        
+        return test_batch_size
+
+    # Find optimal batch size using dynamic manager
+    if not hasattr(batch_manager, '_calibrated_for_this_config'):
+        print(f"[DynamicBatch] Calibrating for N={N}, ensemble_size={ensemble_size}")
+        initial_guess = batch_manager.predict_safe_batch_size(ensemble_size)
+        optimal_batch_size = batch_manager.find_optimal_batch_size(test_batch_size, initial_guess)
+        batch_manager._calibrated_for_this_config = True
+    else:
+        optimal_batch_size = batch_manager.current_batch_size
+
     outputs = []
     for p in range(P):
         buffers["curr"][:N].copy_(curr_base)
@@ -133,13 +262,40 @@ def batched_forward_proposals(
         full_input = full_input.view(N * ensemble_size, C, H, W)
         full_time  = time_normalised.view(-1, 1).expand(-1, ensemble_size).reshape(-1, 1)
 
-        step = outer_bs * ensemble_size
+        # Use dynamic batch size with fallback mechanism
+        step = optimal_batch_size * ensemble_size
         out_chunks = []
-        for start in range(0, N * ensemble_size, step):
+        
+        start = 0
+        while start < N * ensemble_size:
             end = min(start + step, N * ensemble_size)
-            with torch.no_grad():
-                y = model(full_input[start:end], full_time[start:end])
-            out_chunks.append(y)
+            
+            try:
+                with torch.no_grad():
+                    y = model(full_input[start:end], full_time[start:end])
+                out_chunks.append(y)
+                start = end
+                
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    torch.cuda.empty_cache()
+                    
+                    # Halve batch size and retry
+                    optimal_batch_size = max(1, optimal_batch_size // 2)
+                    step = optimal_batch_size * ensemble_size
+                    batch_manager.current_batch_size = optimal_batch_size
+                    
+                    print(f"[DynamicBatch] OOM encountered, reducing batch size to {optimal_batch_size}")
+                    
+                    # Retry with smaller batch
+                    end = min(start + step, N * ensemble_size)
+                    with torch.no_grad():
+                        y = model(full_input[start:end], full_time[start:end])
+                    out_chunks.append(y)
+                    start = end
+                else:
+                    raise e
+        
         y_full = torch.cat(out_chunks, dim=0).view(N, ensemble_size, V, H, W)
         outputs.append(y_full.permute(1, 0, 2, 3, 4))  # [K,N,V,H,W]
 
@@ -180,14 +336,18 @@ def run_gibbs_abc_rfp(
         "stat": torch.empty((N, ensemble_size, 2, H, W), device=device),
     }
 
-    outer_bs = compute_safe_batch_size(
+    # Initialize dynamic batch manager
+    initial_batch_size = compute_safe_batch_size(
         ensemble_size=ensemble_size,
         num_variables=C,
         spatial_height=H,
         spatial_width=W,
         num_outputs=V,
     )
-    print(f"[device warm‑up] outer batch = {outer_bs}")
+    batch_manager = DynamicBatchManager(device, initial_batch_size=initial_batch_size)
+    print(f"[DynamicBatch] Initial conservative batch size: {initial_batch_size}")
+    
+    # Device warm-up
     with torch.no_grad():
         _ = model(prev_all[:1], time_all[:1])
 
@@ -239,6 +399,11 @@ def run_gibbs_abc_rfp(
 
             alpha_tensor = torch.tensor(alpha_mat, device=device, dtype=torch.float32)  # [P,V]
 
+            # Memory status before inference
+            allocated_before, _, total_mem, free_mem = batch_manager.get_memory_stats()
+            print(f" {variable_names[v]:5s} | Mem: {allocated_before/1e9:.1f}/{total_mem/1e9:.1f}GB, "
+                  f"Batch: {batch_manager.current_batch_size}")
+
             torch_gen.manual_seed(int(rng.integers(0, 2**31 - 1)))
             ens_prop = batched_forward_proposals(
                 model=model,
@@ -250,7 +415,7 @@ def run_gibbs_abc_rfp(
                 ensemble_size=ensemble_size,
                 device=device,
                 buffers=buffers,
-                outer_bs=outer_bs,
+                batch_manager=batch_manager,
                 generator=torch_gen,
             )  # [P,K,N,V,H,W]
 

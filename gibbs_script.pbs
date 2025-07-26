@@ -43,4 +43,4 @@ echo "Running at $(date -u) on $(hostname)"
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
-python rfp_gibbs_verbose.py > "$RESULT_DIR/output_gpu.log" 2> "$RESULT_DIR/error_gpu.log"
+python rfp_gibbs_main.py > "$RESULT_DIR/output_gpu.log" 2> "$RESULT_DIR/error_gpu.log"

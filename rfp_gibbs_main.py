@@ -80,17 +80,7 @@ def main():
     V = example_output.shape[1]
     H, W = example_input.shape[-2:]
 
-    print("Estimating safe chunk size...")
-    chunk_size = min(256,compute_safe_batch_size(
-        ensemble_size=config.ensemble_size,
-        num_variables=C,
-        spatial_height=H,
-        spatial_width=W,
-        num_outputs=V,
-        model_overhead=1.5,
-        safety_divisor=16.0
-    ))
-    print(f"Safe chunk size determined: {chunk_size} samples per batch")
+    print("Dynamic batch management will be handled automatically during inference...")
 
     try:
         print("Commencing ABC-Gibbs inference with RFP perturbations...")
