@@ -1,8 +1,10 @@
-import os, psutil, numpy as np, torch
+import os
+import psutil
+import numpy as np
+import torch
 from typing import Any
 from tqdm import tqdm
 from core.evaluation import (
-    continuous_ranked_probability_score,
     compute_rank_histogram,
     compute_mean_absolute_error,
     compute_ensemble_spread,
@@ -183,6 +185,22 @@ def generate_joint_rfp(
     return perturb  # [P,B,K,V,H,W]
 
 # --------------------------------------------------------------------------- #
+def compute_crps_for_proposal(
+    ensemble_output: torch.Tensor,  # [K,N,V,H,W]
+    target: torch.Tensor,          # [N,V,H,W]
+    num_variables: int,
+) -> float:
+    """Compute joint CRPS score for a single proposal to avoid memory accumulation."""
+    from core.evaluation import continuous_ranked_probability_score
+    
+    crps_vars = []
+    for j in range(num_variables):
+        crps_pj = continuous_ranked_probability_score(
+            ensemble_output[:, :, j], target[:, j]
+        ).mean()
+        crps_vars.append(crps_pj)
+    return torch.stack(crps_vars).mean().item()
+
 def batched_forward_proposals(
     *,
     model: torch.nn.Module,
@@ -196,10 +214,10 @@ def batched_forward_proposals(
     buffers: dict,
     batch_manager: DynamicBatchManager,
     generator: torch.Generator,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, list[float]]:
     """
-    Evaluate *all* proposals in alpha_matrix jointly with dynamic memory management.
-    Returns ensemble forecasts of shape [P,K,N,V,H,W].
+    Evaluate proposals one by one to avoid large memory accumulation.
+    Returns best proposal output [K,N,V,H,W] and all CRPS scores.
     """
     N, C, H, W = previous_fields.shape
     V = current_fields.shape[1]
@@ -251,7 +269,11 @@ def batched_forward_proposals(
     else:
         optimal_batch_size = batch_manager.current_batch_size
 
-    outputs = []
+    # Process proposals one by one to avoid memory accumulation
+    joint_scores = []
+    best_proposal_output = None
+    best_score = float('inf')
+    
     for p in range(P):
         buffers["curr"][:N].copy_(curr_base)
         buffers["curr"][:N].add_(perturb[p])  # add joint perturbation
@@ -297,9 +319,26 @@ def batched_forward_proposals(
                     raise e
         
         y_full = torch.cat(out_chunks, dim=0).view(N, ensemble_size, V, H, W)
-        outputs.append(y_full.permute(1, 0, 2, 3, 4))  # [K,N,V,H,W]
+        proposal_output = y_full.permute(1, 0, 2, 3, 4)  # [K,N,V,H,W]
+        
+        # Compute CRPS immediately to avoid storing large tensors
+        joint_score = compute_crps_for_proposal(proposal_output, current_fields, V)
+        joint_scores.append(joint_score)
+        
+        # Keep track of best proposal
+        if joint_score < best_score:
+            best_score = joint_score
+            # Store only the best proposal output
+            if best_proposal_output is not None:
+                del best_proposal_output
+                torch.cuda.empty_cache()
+            best_proposal_output = proposal_output.clone()
+        
+        # Clean up to save memory
+        del proposal_output, y_full, out_chunks
+        torch.cuda.empty_cache()
 
-    return torch.stack(outputs, dim=0)  # [P,K,N,V,H,W]
+    return best_proposal_output, joint_scores
 
 # --------------------------------------------------------------------------- #
 def run_gibbs_abc_rfp(
@@ -400,12 +439,12 @@ def run_gibbs_abc_rfp(
             alpha_tensor = torch.tensor(alpha_mat, device=device, dtype=torch.float32)  # [P,V]
 
             # Memory status before inference
-            allocated_before, _, total_mem, free_mem = batch_manager.get_memory_stats()
+            allocated_before, _, total_mem, _ = batch_manager.get_memory_stats()
             print(f" {variable_names[v]:5s} | Mem: {allocated_before/1e9:.1f}/{total_mem/1e9:.1f}GB, "
                   f"Batch: {batch_manager.current_batch_size}")
 
             torch_gen.manual_seed(int(rng.integers(0, 2**31 - 1)))
-            ens_prop = batched_forward_proposals(
+            best_ensemble, joint_scores = batched_forward_proposals(
                 model=model,
                 previous_fields=prev_all,
                 current_fields=curr_all,
@@ -417,19 +456,8 @@ def run_gibbs_abc_rfp(
                 buffers=buffers,
                 batch_manager=batch_manager,
                 generator=torch_gen,
-            )  # [P,K,N,V,H,W]
+            )  # Returns [K,N,V,H,W] and list of scores
 
-            # Compute joint mean CRPS for each proposal
-            # Loop over variables to avoid huge memory for pairwise distances simultaneously
-            joint_scores = []
-            for p in range(n_proposals):
-                crps_vars = []
-                for j in range(num_variables):
-                    crps_pj = continuous_ranked_probability_score(
-                        ens_prop[p, :, :, j], curr_all[:, j]
-                    ).mean()
-                    crps_vars.append(crps_pj)
-                joint_scores.append(torch.stack(crps_vars).mean().item())
             joint_scores = np.array(joint_scores)
 
             # Select best proposal (min joint CRPS)
@@ -441,20 +469,23 @@ def run_gibbs_abc_rfp(
             print(f" {variable_names[v]:5s} α*={current_alpha[v,0]:.3f}  jointCRPS={joint_scores[best_idx]: .4f}")
 
             if log_diagnostics:
-                # Use ensembles from best proposal for per-variable diagnostics
-                best_members = ens_prop[best_idx]  # [K,N,V,H,W]
+                # Use best ensemble output for per-variable diagnostics
                 for j in range(num_variables):
                     if j == v:  # update diag for changed coord; optional: all j
-                        spread_val = compute_ensemble_spread(best_members[:, :, j].cpu())
+                        spread_val = compute_ensemble_spread(best_ensemble[:, :, j].cpu())
                         mae_val    = compute_mean_absolute_error(
-                            best_members[:, :, j].cpu(), curr_all[:, j].cpu()
+                            best_ensemble[:, :, j].cpu(), curr_all[:, j].cpu()
                         )
                         ensemble_spread_records[j].append(spread_val)
                         mean_absolute_error_records[j].append(mae_val)
                         ranks = compute_rank_histogram(
-                            best_members[:, :, j], curr_all[:, j], ensemble_size
+                            best_ensemble[:, :, j], curr_all[:, j], ensemble_size
                         )
                         rank_histograms[j].extend(ranks.tolist())
+            
+            # Clean up memory
+            del best_ensemble
+            torch.cuda.empty_cache()
 
         step_mean_crps[s] = posterior_crps[s].mean()
         print(f"⇒ mean joint CRPS (all vars) = {step_mean_crps[s]:.4f}")
