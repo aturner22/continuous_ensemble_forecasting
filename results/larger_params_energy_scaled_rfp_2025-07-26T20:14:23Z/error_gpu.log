@@ -1,0 +1,16 @@
+Loading batches:   0%|          | 0/500 [00:00<?, ?it/s]Loading batches: 100%|██████████| 500/500 [00:00<00:00, 3052623.00it/s]
+Gibbs:   0%|          | 0/50 [00:00<?, ?it/s]Gibbs:   0%|          | 0/50 [00:18<?, ?it/s]
+Traceback (most recent call last):
+  File "/rds/general/user/at1824/home/msc_project/rfp_gibbs_main.py", line 159, in <module>
+    main()
+  File "/rds/general/user/at1824/home/msc_project/rfp_gibbs_main.py", line 87, in main
+    results = run_gibbs_abc_rfp(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 486, in run_gibbs_abc_rfp
+    best_ensemble, joint_scores = batched_forward_proposals(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 364, in batched_forward_proposals
+    joint_score = compute_crps_for_proposal(proposal_output, current_fields, V)
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 237, in compute_crps_for_proposal
+    crps_pj = memory_efficient_crps(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 204, in memory_efficient_crps
+    ensemble_flat = ensemble.view(K, -1)  # [K, spatial_total]
+RuntimeError: view size is not compatible with input tensor's size and stride (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
