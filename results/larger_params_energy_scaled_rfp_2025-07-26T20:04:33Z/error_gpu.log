@@ -1,0 +1,16 @@
+Loading batches:   0%|          | 0/500 [00:00<?, ?it/s]Loading batches: 100%|██████████| 500/500 [00:00<00:00, 3084047.06it/s]
+Gibbs:   0%|          | 0/50 [00:00<?, ?it/s]Gibbs:   0%|          | 0/50 [00:18<?, ?it/s]
+Traceback (most recent call last):
+  File "/rds/general/user/at1824/home/msc_project/rfp_gibbs_main.py", line 159, in <module>
+    main()
+  File "/rds/general/user/at1824/home/msc_project/rfp_gibbs_main.py", line 87, in main
+    results = run_gibbs_abc_rfp(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 447, in run_gibbs_abc_rfp
+    best_ensemble, joint_scores = batched_forward_proposals(
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 325, in batched_forward_proposals
+    joint_score = compute_crps_for_proposal(proposal_output, current_fields, V)
+  File "/rds/general/user/at1824/home/msc_project/core/gibbs_abc_threaded_rfp.py", line 198, in compute_crps_for_proposal
+    crps_pj = continuous_ranked_probability_score(
+  File "/rds/general/user/at1824/home/msc_project/core/evaluation.py", line 22, in continuous_ranked_probability_score
+    pairwise = torch.abs(ensemble.unsqueeze(0) - ensemble.unsqueeze(1)).mean(dim=(0, 1))
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 9.54 GiB. GPU 0 has a total capacity of 44.42 GiB of which 5.13 GiB is free. Including non-PyTorch memory, this process has 39.29 GiB memory in use. Of the allocated memory 37.18 GiB is allocated by PyTorch, and 1.61 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

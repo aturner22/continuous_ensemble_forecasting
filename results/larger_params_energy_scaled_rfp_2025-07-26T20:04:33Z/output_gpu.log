@@ -1,0 +1,51 @@
+Initializing device...
+
+--- Computing Configuration ---
+Platform: Linux 4.18.0-477.27.1.el8_8.x86_64
+Python version: 3.10.4
+CUDA available: True
+CUDA device count: 1
+CUDA device name: NVIDIA L40S
+CUDA device capability: (8, 9)
+CUDA memory allocated: 0.00 GB
+CUDA memory reserved: 0.00 GB
+torch version: 2.7.1+cu126
+Number of CPUs: 64
+Physical CPU cores: 64
+OMP_NUM_THREADS: 1
+MKL_NUM_THREADS: 1
+OPENBLAS_NUM_THREADS: 1
+TORCH_NUM_THREADS: 1
+N_WORKERS: 16
+PARALLEL_BACKEND: thread
+--------------------------------
+
+Using device: cuda
+Preparing model and data loader...
+Number of samples: 350640
+Using every 2'th sample for evaluation...
+Using random subset of 500 samples (seed=42)
+Materializing input batches...
+Preparing standardized reference tensor...
+Loading precomputed standardized ERA5 tensor...
+Dynamic batch management will be handled automatically during inference...
+Commencing ABC-Gibbs inference with RFP perturbations...
+[DynamicBatch] Initial conservative batch size: 16
+
+[Gibbs step 1/50]
+ z500  | Mem: 17.0/47.7GB, Batch: 16
+[DynamicBatch] Calibrating for N=500, ensemble_size=50
+[DynamicBatch] Finding optimal batch size between 1 and 32
+[DynamicBatch] Testing batch size: 16
+[DynamicBatch] ✓ Batch size 16 succeeded
+[DynamicBatch] Testing batch size: 24
+[DynamicBatch] ✓ Batch size 24 succeeded
+[DynamicBatch] Testing batch size: 28
+[DynamicBatch] ✓ Batch size 28 succeeded
+[DynamicBatch] Testing batch size: 30
+[DynamicBatch] ✓ Batch size 30 succeeded
+[DynamicBatch] Testing batch size: 31
+[DynamicBatch] ✓ Batch size 31 succeeded
+[DynamicBatch] Testing batch size: 32
+[DynamicBatch] ✓ Batch size 32 succeeded
+[DynamicBatch] Optimal batch size found: 32
